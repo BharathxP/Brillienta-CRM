@@ -1,6 +1,6 @@
 # Brillienta CRM: Power Automate flow pack
 
-`dist/BrillientaCRMFlows_1_3_0_0.zip` is an **unmanaged Power Platform solution** containing 8 ready-made cloud flows, 3 connection references and 7 environment variables. To rebuild it, run `node flows/build-solution.mjs`. The build checks every flow before zipping.
+`dist/BrillientaCRMFlows_1_3_1_0.zip` is an **unmanaged Power Platform solution** containing 8 ready-made cloud flows, 3 connection references and 7 environment variables. To rebuild it, run `node flows/build-solution.mjs`. The build checks every flow before zipping.
 
 ## The flows
 

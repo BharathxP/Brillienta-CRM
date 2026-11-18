@@ -2,8 +2,9 @@
 import * as React from 'react';
 import {
   Pivot, PivotItem, Stack, TextField, PrimaryButton, DefaultButton, Toggle, Dropdown, MessageBar, MessageBarType, Text, IconButton,
-  Link, Checkbox, Spinner, SpinnerSize, Label
+  Link, Checkbox, Spinner, SpinnerSize, Label, Dialog, DialogType, DialogFooter
 } from '@fluentui/react';
+import { downloadFlowPack, IFlowPackInfo, loadFlowPack } from '../../services/FlowPackage';
 import { ENTITIES, EntityKey, FieldType } from '../../models/model';
 import { ICrmSettings, ICustomField, IStageDef, IWebhook, WEBHOOK_EVENTS } from '../../models/settings';
 import { useCrm } from '../CrmContext';
@@ -21,6 +22,82 @@ const parseKv = (s: string): Record<string, number> => {
 };
 
 const TENANT_SITE_KEY = 'BrillientaCRM.SiteUrl';
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Download the Power Automate solution, pre-filled with this customer's site, page and recipients. */
+const FlowPackDialog: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const { engine, notify } = useCrm();
+  const [pack, setPack] = React.useState<IFlowPackInfo>();
+  const [values, setValues] = React.useState<Record<string, string>>({});
+  const [error, setError] = React.useState<string>();
+  const [done, setDone] = React.useState<string>();
+  React.useEffect(() => {
+    loadFlowPack().then(p => {
+      const site = engine.ds.rest.webUrl.replace(/\/$/, '');
+      const here = window.location.href.split(/[?#]/)[0];
+      const page = /\.aspx$/i.test(here) && here.toLowerCase().indexOf(site.toLowerCase()) === 0 ? here : `${site}/SitePages/Home.aspx`;
+      const me = engine.me?.email || '';
+      const pre: Record<string, string> = {};
+      p.env.forEach(e => {
+        const n = e.schema.toLowerCase();
+        pre[e.schema] = n.indexOf('crmsiteurl') >= 0 ? site
+          : n.indexOf('crmpageurl') >= 0 ? page
+            : /email$/.test(n) ? (me || e.defaultValue)
+              : e.defaultValue;
+      });
+      setValues(pre);
+      setPack(p);
+    }).catch(e => setError(errorText(e)));
+  }, []);
+  const invalid = (schema: string, v: string): string | undefined => {
+    const n = schema.toLowerCase();
+    if (!v.trim()) { return 'Required'; }
+    if (/url$/.test(n) && !/^https:\/\/\S+$/i.test(v)) { return 'Must start with https://'; }
+    if (/email$/.test(n) && !EMAIL_RE.test(v)) { return 'Enter a valid email address'; }
+    return undefined;
+  };
+  const anyInvalid = !pack || pack.env.some(e => !!invalid(e.schema, values[e.schema] || ''));
+  const download = (): void => {
+    downloadFlowPack(values).then(name => { setDone(name); notify(`Downloaded ${name}.`, MessageBarType.success); })
+      .catch(e => setError(errorText(e)));
+  };
+  return (
+    <Dialog hidden={false} onDismiss={onClose} minWidth={620} maxWidth={760}
+      dialogContentProps={{ type: DialogType.largeHeader, title: 'Download Power Automate solution', subText: pack ? `Brillienta CRM Flows v${pack.version} · ${pack.flows.length} ready-made flows` : undefined }}>
+      {!pack && !error && <Spinner label="Preparing the solution..." />}
+      {error && <MessageBar messageBarType={MessageBarType.error}>{error}</MessageBar>}
+      {pack && !done && (
+        <Stack tokens={{ childrenGap: 8 }}>
+          <Text variant="small">These values are written into the solution so the import is pre-filled. You can still change them during or after import.</Text>
+          {pack.env.map(e => (
+            <TextField key={e.schema} label={e.name} description={e.description} value={values[e.schema] || ''}
+              errorMessage={invalid(e.schema, values[e.schema] || '')} onChange={(_, v) => setValues({ ...values, [e.schema]: v || '' })} />
+          ))}
+        </Stack>
+      )}
+      {pack && done && (
+        <Stack tokens={{ childrenGap: 8 }}>
+          <MessageBar messageBarType={MessageBarType.success}>Downloaded <b>{done}</b>.</MessageBar>
+          <Text variant="mediumPlus" styles={{ root: { fontWeight: 600 } }}>Next steps</Text>
+          <ol className="crm-ul">
+            <li>Open <Link href="https://make.powerautomate.com" target="_blank">make.powerautomate.com</Link> and choose the right environment.</li>
+            <li><b>Solutions › Import solution</b> › select the zip › Next.</li>
+            <li>Create or pick the connections: <b>SharePoint</b>, <b>Office 365 Outlook</b>, <b>Approvals</b> (a service account is best).</li>
+            <li>Check the environment variables (already filled in) › <b>Import</b>.</li>
+            <li>Open the solution and <b>turn on</b> the flows you want.</li>
+            <li>Website / AppSource: copy the HTTP URL of the flow into Vercel (<code>CRM_WEBHOOK_URL</code>) or Partner Center.</li>
+          </ol>
+          <Text variant="small" className="crm-muted">Flows included: {pack.flows.map(f => f.name.replace('Brillienta CRM - ', '')).join(' · ')}</Text>
+        </Stack>
+      )}
+      <DialogFooter>
+        {!done && <PrimaryButton iconProps={{ iconName: 'Download' }} text="Download .zip" disabled={anyInvalid} onClick={download} />}
+        <DefaultButton text={done ? 'Close' : 'Cancel'} onClick={onClose} />
+      </DialogFooter>
+    </Dialog>
+  );
+};
 
 const TeamsSettings: React.FC<{ host: string; tenantSiteUrl: string }> = ({ host, tenantSiteUrl }) => {
   const { engine, notify } = useCrm();
@@ -119,6 +196,7 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
   };
 
   const lic = engine.license;
+  const [flowDialog, setFlowDialog] = React.useState(false);
 
   return (
     <Stack tokens={{ childrenGap: 12 }}>
@@ -128,6 +206,7 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
         {busy && <Spinner size={SpinnerSize.small} label={progress} labelPosition="right" />}
         {dirty && <Text className="crm-muted">Unsaved changes</Text>}
       </Stack>
+      {flowDialog && <FlowPackDialog onClose={() => setFlowDialog(false)} />}
       <Pivot overflowBehavior="menu">
         <PivotItem headerText="Company" itemIcon="CityNext">
           <div className="crm-dash-grid" style={{ paddingTop: 12 }}>
@@ -262,7 +341,10 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
                 onClick={() => engine.webhooks.test(s.integrations.teamsWebhookUrl).then(() => notify('Test sent.', MessageBarType.success)).catch(e => notify(errorText(e), MessageBarType.error))} />
             </Card>
             <Card title="Power Automate flow pack" wide>
-              <Text variant="small" block>Import <b>BrillientaCRMFlows_1_3_0_0.zip</b> (included with the product) in <b>Power Automate › Solutions › Import solution</b>, create the connections it asks for, set the environment variables (site URL, manager emails), then turn the flows on.</Text>
+              <Stack horizontal wrap verticalAlign="center" tokens={{ childrenGap: 12 }} style={{ marginBottom: 6 }}>
+                <PrimaryButton iconProps={{ iconName: 'Download' }} text="Download Power Automate solution" onClick={() => setFlowDialog(true)} />
+                <Text variant="small" className="crm-muted">Pre-filled for this site · import in <b>Power Automate › Solutions › Import solution</b></Text>
+              </Stack>
               <ul className="crm-ul">
                 <li><b>AppSource lead intake</b> – Partner Center HTTPS endpoint → leads list <i>(Power Automate Premium)</i></li>
                 <li><b>Website leads &amp; demo bookings</b> – brillienta.com demo bookings → lead + demo request; support requests → case with SLA; enquiries → lead <i>(Premium)</i></li>
