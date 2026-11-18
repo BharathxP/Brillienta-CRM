@@ -1,13 +1,13 @@
 # Brillienta CRM: Power Automate flow pack
 
-`dist/BrillientaCRMFlows_1_2_0_0.zip` is an **unmanaged Power Platform solution** containing 8 ready-made cloud flows, 3 connection references and 6 environment variables. To rebuild it, run `node flows/build-solution.mjs`. The build checks every flow before zipping.
+`dist/BrillientaCRMFlows_1_3_0_0.zip` is an **unmanaged Power Platform solution** containing 8 ready-made cloud flows, 3 connection references and 7 environment variables. To rebuild it, run `node flows/build-solution.mjs`. The build checks every flow before zipping.
 
 ## The flows
 
 | Flow | Trigger | What it does | Licence |
 |---|---|---|---|
 | **AppSource lead intake** | HTTP request (Partner Center → *Customer leads* → HTTPS endpoint) | Creates the lead in `AppSource Leads` (source AppSource or Azure Marketplace, status New, raw payload kept) and always answers HTTP 200 | **Premium** |
-| **Website leads & demo bookings** | Your website's `/api/lead` function forwards each submission | Book-demo form: creates a **Hot** lead and a **demo request** with the visitor's chosen products, time slot (UTC and their time zone) and length, then emails the sales manager. Contact form: creates a lead. Keeps UTM, landing page and referrer. Uses your website's existing spam trap | **Premium** |
+| **Website leads & demo bookings** | brillienta.com `api/lead.js` sends every validated lead (`CRM_WEBHOOK_URL`) | **Demo booking:** Hot lead + demo request (products, requested slot in UTC and the visitor's time zone, length) + email to sales. **Support request** (Issue, Feature request, How-to, Licence & billing, Security): **case** with the `BR-…` reference, priority from the visitor's impact, SLA deadline, linked to the contact if the email matches, + email to support. **Other enquiry:** lead. Keeps UTM, landing page and referrer. Checks the `x-lead-key` header | **Premium** |
 | **New lead alert** | New item in `AppSource Leads` | Emails the lead owner. Unassigned leads go to the sales manager | Standard |
 | **Daily sales digest** | Weekdays 07:00 UTC | New leads, deals won (last 24 h), deals closing in 7 days and overdue tasks, sent to the sales manager | Standard |
 | **Overdue reminders** | Weekdays 06:00 UTC | **One email per person** listing their overdue tasks and lead follow-ups | Standard |
@@ -30,10 +30,11 @@ The CRM enforces the approval step. A quote whose total discount is above **Sett
    | Sales manager email | `sales.manager@contoso.com` |
    | Finance email | `finance@contoso.com` |
    | Support manager email | `support@contoso.com` |
+   | Website shared key | same as `CRM_WEBHOOK_KEY` in Vercel, or `off` |
    | Customer folder library | `Documents` |
 
 4. **Turn on** the flows you want. They're imported switched **off**, so nothing runs before it's configured.
-5. **Website (brillienta.com):** open *Website leads and demo bookings* and copy its **HTTP URL**. In Vercel › Settings › Environment Variables, add `BRILLIENTA_CRM_FLOW_URL` with that URL. Add `forwardToCrm()` from `vercel-api-lead-crm.js` to `api/lead.js`, and call `await forwardToCrm(body)` after your spam checks pass. Redeploy. Your existing book-demo and contact pages stay unchanged.
+5. **Website (brillienta.com):** open *Website leads and demo bookings*, copy its **HTTP URL**, and add it in Vercel › Settings › Environment Variables as `CRM_WEBHOOK_URL`. Optionally add `CRM_WEBHOOK_KEY` and set the flow's **Website shared key** variable to the same value. Then redeploy. This is already supported in the website code (`api/lead.js`). It runs alongside your existing `LEAD_WEBHOOK_URL` flow and email, and never replaces them.
 6. **AppSource only:** open *AppSource lead intake*, copy the **HTTP URL** from the trigger, paste it in Partner Center (*Customer leads › HTTPS endpoint*) and click **Validate**.
 
 ## Notes and requirements

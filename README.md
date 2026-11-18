@@ -28,7 +28,7 @@ A complete CRM delivered as one SharePoint Framework (SPFx 1.24) web part. All d
 | **AppSource / Partner Center** | HTTPS endpoint → Power Automate → leads list (see below) |
 | **Webhooks** | 17 events (`lead.created`, `opportunity.won`, `case.created`, …) to Power Automate, Logic Apps, Zapier, Make, n8n or your own API |
 | **Data** | CSV import/export (Excel, HubSpot, Salesforce, Dynamics exports) · full JSON backup |
-| **Power Automate flow pack** | 8 ready-made flows as an importable solution (`flows/dist/BrillientaCRMFlows_1_2_0_0.zip`): AppSource lead intake, website leads & demo bookings (your website's existing forms, via `flows/vercel-api-lead-crm.js`), new lead alert, daily sales digest, overdue reminders, case SLA escalation, deal-won handoff, quote discount approval. See `flows/README.md` |
+| **Power Automate flow pack** | 8 ready-made flows as an importable solution (`flows/dist/BrillientaCRMFlows_1_3_0_0.zip`): AppSource lead intake, website leads, demo bookings & support requests (brillienta.com `api/lead.js` → `CRM_WEBHOOK_URL`), new lead alert, daily sales digest, overdue reminders, case SLA escalation, deal-won handoff, quote discount approval. See `flows/README.md` |
 
 ## Enterprise features
 

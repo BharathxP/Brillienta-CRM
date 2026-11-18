@@ -262,10 +262,10 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
                 onClick={() => engine.webhooks.test(s.integrations.teamsWebhookUrl).then(() => notify('Test sent.', MessageBarType.success)).catch(e => notify(errorText(e), MessageBarType.error))} />
             </Card>
             <Card title="Power Automate flow pack" wide>
-              <Text variant="small" block>Import <b>BrillientaCRMFlows_1_2_0_0.zip</b> (included with the product) in <b>Power Automate › Solutions › Import solution</b>, create the connections it asks for, set the environment variables (site URL, manager emails), then turn the flows on.</Text>
+              <Text variant="small" block>Import <b>BrillientaCRMFlows_1_3_0_0.zip</b> (included with the product) in <b>Power Automate › Solutions › Import solution</b>, create the connections it asks for, set the environment variables (site URL, manager emails), then turn the flows on.</Text>
               <ul className="crm-ul">
                 <li><b>AppSource lead intake</b> – Partner Center HTTPS endpoint → leads list <i>(Power Automate Premium)</i></li>
-                <li><b>Website leads &amp; demo bookings</b> – your website’s book-demo and contact forms create leads and demo requests (chosen time slot, products, UTM) <i>(Premium)</i></li>
+                <li><b>Website leads &amp; demo bookings</b> – brillienta.com demo bookings → lead + demo request; support requests → case with SLA; enquiries → lead <i>(Premium)</i></li>
                 <li><b>New lead alert</b> – emails the owner; unassigned leads go to the sales manager</li>
                 <li><b>Daily sales digest</b> – new leads, deals won, deals closing, overdue tasks (weekdays)</li>
                 <li><b>Overdue reminders</b> – one email per person with their overdue tasks and follow-ups</li>

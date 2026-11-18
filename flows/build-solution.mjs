@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const VERSION = '1.2.0.0';
+const VERSION = '1.3.0.0';
 const SOLUTION = 'BrillientaCRMFlows';
 const PREFIX = 'bri';
 
@@ -24,6 +24,7 @@ const ENV = {
   sales: { schema: `${PREFIX}_SalesManagerEmail`, name: 'Sales manager email', def: 'sales.manager@contoso.com', desc: 'Receives the daily digest, unassigned-lead alerts and quote approvals.' },
   finance: { schema: `${PREFIX}_FinanceEmail`, name: 'Finance email', def: 'finance@contoso.com', desc: 'Notified when a deal is won.' },
   support: { schema: `${PREFIX}_SupportManagerEmail`, name: 'Support manager email', def: 'support.manager@contoso.com', desc: 'Notified when a case breaches its SLA.' },
+  key: { schema: `${PREFIX}_WebsiteKey`, name: 'Website shared key', def: 'off', desc: 'Same value as CRM_WEBHOOK_KEY (or LEAD_WEBHOOK_KEY) in Vercel; checked against the x-lead-key header. "off" accepts every request.' },
   library: { schema: `${PREFIX}_CustomerFolderLibrary`, name: 'Customer folder library', def: 'Documents', desc: 'Document library (on the CRM site) where a folder is created for every won customer.' }
 };
 const pname = (k) => `${ENV[k].name} (${ENV[k].schema})`;
@@ -111,11 +112,13 @@ flow('Brillienta CRM - AppSource lead intake',
     Response: { runAfter: { Create_lead: ['Succeeded', 'Failed', 'Skipped', 'TimedOut'] }, type: 'Response', kind: 'Http', inputs: { statusCode: 200 } }
   });
 
-// 1b — Website leads & demo bookings (brillienta.com /api/lead forwards each submission here)
-const tb = (k) => `triggerBody()?['${k}']`;
+// 1b — Website leads, demo bookings & support requests.
+// brillienta.com api/lead.js validates every form submission and POSTs a clean record here (CRM_WEBHOOK_URL).
+const L = (k) => `triggerBody()?['${k}']`;
+const SUPPORT_TYPES = "createArray('Issue', 'Feature request', 'How-to question', 'Licence & billing', 'Security or compliance')";
 flow('Brillienta CRM - Website leads and demo bookings',
-  'Receives submissions from the website (book-demo and contact forms) forwarded by the site\'s /api/lead function. Creates a lead (with UTM attribution); for demo bookings also creates a demo request with the requested time slot and length, and alerts the sales manager. Requires Power Automate Premium (HTTP trigger).',
-  ['sp', 'outlook'], ['site', 'page', 'sales'],
+  'Receives validated submissions from the brillienta.com /api/lead function (book-demo and contact forms). Demo bookings → Hot lead + demo request; support requests → case with SLA; other enquiries → lead. Checks the x-lead-key header. Requires Power Automate Premium (HTTP trigger).',
+  ['sp', 'outlook'], ['site', 'page', 'sales', 'support', 'key'],
   {
     manual: {
       type: 'Request', kind: 'Http',
@@ -125,83 +128,128 @@ flow('Brillienta CRM - Website leads and demo bookings',
           type: 'object',
           properties: {
             kind: { type: 'string' }, name: { type: 'string' }, email: { type: 'string' }, company: { type: 'string' }, role: { type: 'string' },
-            size: { type: 'string' }, country: { type: 'string' }, notes: { type: 'string' }, message: { type: 'string' }, subject: { type: 'string' },
-            request_type: { type: 'string' }, products: { type: 'array', items: { type: 'string' } }, duration: { type: 'integer' }, start: { type: 'string' },
-            timeZone: { type: 'string' }, website: { type: 'string' }, attribution: { type: 'object' }, landing_page: { type: 'string' }, referrer: { type: 'string' }, page: { type: 'string' }
+            size: { type: 'string' }, country: { type: 'string' }, message: { type: 'string' },
+            interests: { type: 'array', items: { type: 'string' } }, products: { type: 'array', items: { type: 'string' } },
+            data_location: { type: 'string' }, timeline: { type: 'string' }, request_type: { type: 'string' }, product: { type: 'string' },
+            subject: { type: 'string' }, impact: { type: 'string' }, version: { type: 'string' }, reference: { type: 'string' },
+            duration_minutes: { type: ['integer', 'null'] }, requested_start: { type: 'string' }, visitor_time_zone: { type: 'string' },
+            consent: { type: 'boolean' }, page: { type: 'string' }, referrer: { type: 'string' }, landing_page: { type: 'string' },
+            attribution: { type: 'object' }, received_at: { type: 'string' }
           }
         }
       }
     }
   },
   {
-    Full_name: { runAfter: {}, type: 'Compose', inputs: `@trim(coalesce(${tb('name')}, ''))` },
-    First_name: { runAfter: { Full_name: ['Succeeded'] }, type: 'Compose', inputs: "@first(split(outputs('Full_name'), ' '))" },
-    Last_name: { runAfter: { First_name: ['Succeeded'] }, type: 'Compose', inputs: "@if(contains(outputs('Full_name'), ' '), trim(substring(outputs('Full_name'), indexOf(outputs('Full_name'), ' '))), '')" },
-    Products: { runAfter: {}, type: 'Compose', inputs: `@join(coalesce(${tb('products')}, createArray()), ', ')` },
-    Is_demo: { runAfter: {}, type: 'Compose', inputs: `@equals(toLower(coalesce(${tb('kind')}, '')), 'demo')` },
-    Details: {
-      runAfter: { Products: ['Succeeded'], Is_demo: ['Succeeded'] }, type: 'Compose',
-      inputs: `@{coalesce(${tb('notes')}, ${tb('message')}, '')}
-
-— Website ${'@'}{coalesce(${tb('kind')}, 'lead')} —
-Subject: @{coalesce(${tb('subject')}, ${tb('request_type')}, '')}
-Products: @{outputs('Products')}
-Requested time: @{coalesce(${tb('start')}, '')} (@{coalesce(${tb('timeZone')}, '')}), @{coalesce(${tb('duration')}, '')} min
-Company size: @{coalesce(${tb('size')}, '')}
-UTM: @{coalesce(${tb('attribution')}?['utm_source'], '')} / @{coalesce(${tb('attribution')}?['utm_medium'], '')} / @{coalesce(${tb('attribution')}?['utm_campaign'], '')}
-Landing page: @{coalesce(${tb('landing_page')}, '')}
-Referrer: @{coalesce(${tb('referrer')}, '')}`
-    },
-    Is_human: {
-      runAfter: { Details: ['Succeeded'], Last_name: ['Succeeded'] }, type: 'If',
-      // the website's hidden "website" field is a spam trap
-      expression: { and: [{ equals: [`@coalesce(${tb('website')}, '')`, ''] }, { not: { equals: [`@coalesce(${tb('email')}, '')`, ''] } }] },
+    Key_ok: {
+      runAfter: {}, type: 'If',
+      expression: { or: [
+        { equals: [`@toLower(${P('key').slice(1)})`, 'off'] },
+        { equals: ["@coalesce(triggerOutputs()?['headers']?['x-lead-key'], '')", P('key')] }
+      ] },
       actions: {
-        Create_lead: api('sp', 'PostItem', {
-          dataset: P('site'), table: LISTS.leads,
-          'item/Title': "@{outputs('Full_name')}",
-          'item/FirstName': "@{outputs('First_name')}",
-          'item/LastName': "@{outputs('Last_name')}",
-          'item/Email': `@{${tb('email')}}`,
-          'item/Company': `@{${tb('company')}}`,
-          'item/JobTitle': `@{${tb('role')}}`,
-          'item/Country': `@{${tb('country')}}`,
-          'item/LeadSource/Value': "@{if(outputs('Is_demo'), 'Website Demo Form', 'Website')}",
-          'item/Status/Value': 'New',
-          'item/Rating/Value': "@{if(outputs('Is_demo'), 'Hot', 'Warm')}",
-          'item/ActionCode': `@{coalesce(${tb('kind')}, 'lead')}`,
-          'item/Offer': "@{outputs('Products')}",
-          'item/Description': "@{outputs('Details')}",
-          'item/RawPayload': '@{string(triggerBody())}'
-        }),
-        Demo_booking: {
-          runAfter: { Create_lead: ['Succeeded'] }, type: 'If',
-          expression: { and: [{ equals: ["@outputs('Is_demo')", true] }] },
+        Full_name: { runAfter: {}, type: 'Compose', inputs: `@trim(coalesce(${L('name')}, ''))` },
+        First_name: { runAfter: { Full_name: ['Succeeded'] }, type: 'Compose', inputs: "@first(split(outputs('Full_name'), ' '))" },
+        Last_name: { runAfter: { First_name: ['Succeeded'] }, type: 'Compose', inputs: "@if(contains(outputs('Full_name'), ' '), trim(substring(outputs('Full_name'), indexOf(outputs('Full_name'), ' '))), '')" },
+        Products: { runAfter: {}, type: 'Compose', inputs: `@join(union(coalesce(${L('products')}, createArray()), coalesce(${L('interests')}, createArray()), if(empty(coalesce(${L('product')}, '')), createArray(), createArray(${L('product')}))), ', ')` },
+        Kind: { runAfter: {}, type: 'Compose', inputs: `@if(equals(${L('kind')}, 'demo'), 'demo', if(contains(${SUPPORT_TYPES}, coalesce(${L('request_type')}, '')), 'support', 'lead'))` },
+        Details: {
+          runAfter: { Products: ['Succeeded'], Kind: ['Succeeded'] }, type: 'Compose',
+          inputs: `@{coalesce(${L('message')}, '')}
+
+— brillienta.com @{coalesce(${L('kind')}, '')} · @{coalesce(${L('reference')}, '')} —
+Request: @{coalesce(${L('request_type')}, '')}
+Subject: @{coalesce(${L('subject')}, '')}
+Products / interests: @{outputs('Products')}
+Impact: @{coalesce(${L('impact')}, '')}   Version: @{coalesce(${L('version')}, '')}
+Requested time (UTC): @{coalesce(${L('requested_start')}, '')}   Visitor time zone: @{coalesce(${L('visitor_time_zone')}, '')}   Length: @{coalesce(${L('duration_minutes')}, '')} min
+Timeline: @{coalesce(${L('timeline')}, '')}   Data location: @{coalesce(${L('data_location')}, '')}   Company size: @{coalesce(${L('size')}, '')}
+UTM: @{coalesce(${L('attribution')}?['utm_source'], '')} / @{coalesce(${L('attribution')}?['utm_medium'], '')} / @{coalesce(${L('attribution')}?['utm_campaign'], '')}
+Page: @{coalesce(${L('page')}, '')}   Landing page: @{coalesce(${L('landing_page')}, '')}   Referrer: @{coalesce(${L('referrer')}, '')}`
+        },
+        Route: {
+          runAfter: { Details: ['Succeeded'], Last_name: ['Succeeded'] }, type: 'If',
+          expression: { and: [{ equals: ["@outputs('Kind')", 'support'] }] },
+          // ---------------- support request → case
           actions: {
-            Create_demo_request: api('sp', 'PostItem', {
-              dataset: P('site'), table: LISTS.demos,
-              'item/Title': `Demo - @{${tb('company')}} (@{outputs('Products')})`,
-              'item/ContactName': "@{outputs('Full_name')}",
-              'item/Email': `@{${tb('email')}}`,
-              'item/Company': `@{${tb('company')}}`,
-              'item/LeadRef': "@body('Create_lead')?['ID']",
-              'item/PreferredDate': `@if(empty(coalesce(${tb('start')}, '')), null, ${tb('start')})`,
-              'item/DurationMinutes': `@coalesce(${tb('duration')}, 30)`,
-              'item/DemoStatus/Value': 'Requested',
-              'item/Notes': "@{outputs('Details')}"
-            }),
-            Alert_sales: email(P('sales'), `Demo booked: @{outputs('Full_name')} (@{${tb('company')}}) – @{outputs('Products')}`,
-              html('A visitor booked a demo on brillienta.com', `<table>${tr('Name', "@{outputs('Full_name')}")}${tr('Company', `@{${tb('company')}}`)}${tr('Role', `@{${tb('role')}}`)}${tr('Email', `@{${tb('email')}}`)}${tr('Products', "@{outputs('Products')}")}${tr('Requested time (UTC)', `@{${tb('start')}}`)}${tr('Visitor time zone', `@{${tb('timeZone')}}`)}${tr('Length', `@{${tb('duration')}} minutes`)}${tr('Company size', `@{${tb('size')}}`)}${tr('Notes', `@{${tb('notes')}}`)}</table><p>Confirm it in the CRM: Demo requests › Schedule Teams meeting (sends the Teams invite).</p>`),
-              { Create_demo_request: ['Succeeded'] }, { 'emailMessage/Importance': 'High' })
+            Find_contact: api('sp', 'GetItems', { dataset: P('site'), table: 'CRM Contacts', '$filter': `Email eq '@{replace(toLower(${L('email')}), '''', '''''')}'`, '$top': 1 }),
+            Priority: { runAfter: { Find_contact: ['Succeeded', 'Failed'] }, type: 'Compose', inputs: `@if(equals(${L('impact')}, 'Everyone is blocked'), 'Critical', if(equals(${L('impact')}, 'Some people cannot work'), 'High', if(equals(${L('impact')}, 'Minor or cosmetic'), 'Low', 'Normal')))` },
+            Create_case: api('sp', 'PostItem', {
+              dataset: P('site'), table: LISTS.cases,
+              'item/Title': `@{if(empty(coalesce(${L('subject')}, '')), concat(${L('request_type')}, ' from ', outputs('Full_name')), ${L('subject')})}`,
+              'item/CaseNumber': `@{${L('reference')}}`,
+              'item/Priority/Value': "@{outputs('Priority')}",
+              'item/CaseStatus/Value': 'New',
+              'item/Category/Value': `@{if(equals(${L('request_type')}, 'Issue'), 'Problem', if(equals(${L('request_type')}, 'Feature request'), 'Feature request', if(equals(${L('request_type')}, 'Licence & billing'), 'Billing', 'Question')))}`,
+              'item/Origin/Value': 'Web',
+              'item/SlaDue': "@{addHours(utcNow(), if(equals(outputs('Priority'), 'Critical'), 4, if(equals(outputs('Priority'), 'High'), 8, if(equals(outputs('Priority'), 'Low'), 72, 24))))}",
+              'item/ContactRef': "@first(coalesce(body('Find_contact')?['value'], createArray()))?['ID']",
+              'item/AccountRef': "@first(coalesce(body('Find_contact')?['value'], createArray()))?['AccountRef']",
+              'item/Description': `From: @{outputs('Full_name')} <@{${L('email')}}> · @{coalesce(${L('company')}, '')}\n\n@{outputs('Details')}`
+            }, { Priority: ['Succeeded'] }),
+            Alert_support: email(P('support'), `[@{${L('reference')}}] @{${L('request_type')}} (@{outputs('Priority')}): @{coalesce(${L('subject')}, outputs('Full_name'))}`,
+              html('New support request from brillienta.com', `<table>${tr('Reference', `@{${L('reference')}}`)}${tr('Type', `@{${L('request_type')}}`)}${tr('Priority', "@{outputs('Priority')}")}${tr('Product', `@{${L('product')}} @{${L('version')}}`)}${tr('From', `@{outputs('Full_name')} &lt;@{${L('email')}}&gt; · @{${L('company')}}`)}${tr('Impact', `@{${L('impact')}}`)}${tr('Subject', `@{${L('subject')}}`)}${tr('Message', `@{${L('message')}}`)}</table><p>The case is in the CRM under Cases.</p>`),
+              { Create_case: ['Succeeded'] }, { 'emailMessage/Importance': "@{if(contains(createArray('Critical', 'High'), outputs('Priority')), 'High', 'Normal')}" })
           },
-          else: { actions: {} }
+          else: {
+            actions: {
+              // ---------------- demo booking / enquiry → lead
+              Create_lead: api('sp', 'PostItem', {
+                dataset: P('site'), table: LISTS.leads,
+                'item/Title': "@{outputs('Full_name')}",
+                'item/FirstName': "@{outputs('First_name')}",
+                'item/LastName': "@{outputs('Last_name')}",
+                'item/Email': `@{${L('email')}}`,
+                'item/Company': `@{${L('company')}}`,
+                'item/JobTitle': `@{${L('role')}}`,
+                'item/Country': `@{${L('country')}}`,
+                'item/LeadSource/Value': "@{if(equals(outputs('Kind'), 'demo'), 'Website Demo Form', 'Website')}",
+                'item/Status/Value': 'New',
+                'item/Rating/Value': "@{if(equals(outputs('Kind'), 'demo'), 'Hot', 'Warm')}",
+                'item/ActionCode': `@{${L('reference')}}`,
+                'item/Offer': "@{outputs('Products')}",
+                'item/Description': "@{outputs('Details')}",
+                'item/RawPayload': '@{string(triggerBody())}'
+              }),
+              Demo_booking: {
+                runAfter: { Create_lead: ['Succeeded'] }, type: 'If',
+                expression: { and: [{ equals: ["@outputs('Kind')", 'demo'] }] },
+                actions: {
+                  Create_demo_request: api('sp', 'PostItem', {
+                    dataset: P('site'), table: LISTS.demos,
+                    'item/Title': `Demo - @{${L('company')}} (@{outputs('Products')})`,
+                    'item/ContactName': "@{outputs('Full_name')}",
+                    'item/Email': `@{${L('email')}}`,
+                    'item/Company': `@{${L('company')}}`,
+                    'item/LeadRef': "@body('Create_lead')?['ID']",
+                    'item/PreferredDate': `@if(empty(coalesce(${L('requested_start')}, '')), null, ${L('requested_start')})`,
+                    'item/DurationMinutes': `@coalesce(${L('duration_minutes')}, 30)`,
+                    'item/DemoStatus/Value': 'Requested',
+                    'item/Notes': "@{outputs('Details')}"
+                  }),
+                  Alert_sales: email(P('sales'), `Demo booked: @{outputs('Full_name')} (@{${L('company')}}) – @{outputs('Products')}`,
+                    html('A visitor booked a demo on brillienta.com', `<table>${tr('Reference', `@{${L('reference')}}`)}${tr('Name', "@{outputs('Full_name')}")}${tr('Company', `@{${L('company')}}`)}${tr('Role', `@{${L('role')}}`)}${tr('Email', `@{${L('email')}}`)}${tr('Products', "@{outputs('Products')}")}${tr('Requested time (UTC)', `@{${L('requested_start')}}`)}${tr('Visitor time zone', `@{${L('visitor_time_zone')}}`)}${tr('Length', `@{${L('duration_minutes')}} minutes`)}${tr('Company size', `@{${L('size')}}`)}${tr('Notes', `@{${L('message')}}`)}</table><p>Confirm it in the CRM: Demo requests › Schedule Teams meeting (sends the Teams invite).</p>`),
+                    { Create_demo_request: ['Succeeded'] }, { 'emailMessage/Importance': 'High' })
+                },
+                else: { actions: {} }
+              }
+            }
+          }
+        },
+        Respond_ok: {
+          runAfter: { Route: ['Succeeded'] }, type: 'Response', kind: 'Http',
+          inputs: { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: { ok: true, reference: `@{${L('reference')}}` } }
+        },
+        Respond_failed: {
+          runAfter: { Route: ['Failed', 'TimedOut'] }, type: 'Response', kind: 'Http',
+          inputs: { statusCode: 502, headers: { 'Content-Type': 'application/json' }, body: { ok: false } }
         }
       },
-      else: { actions: {} }
-    },
-    Response: {
-      runAfter: { Is_human: ['Succeeded', 'Failed', 'Skipped', 'TimedOut'] }, type: 'Response', kind: 'Http',
-      inputs: { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: { ok: true } }
+      else: {
+        actions: {
+          Respond_unauthorized: { runAfter: {}, type: 'Response', kind: 'Http', inputs: { statusCode: 401, headers: { 'Content-Type': 'application/json' }, body: { ok: false, error: 'key' } } }
+        }
+      }
     }
   });
 
@@ -575,7 +623,7 @@ writeFileSync(join(OUT, 'solution.xml'), `<?xml version="1.0" encoding="utf-8"?>
       <LocalizedName description="Brillienta CRM Flows" languagecode="1033" />
     </LocalizedNames>
     <Descriptions>
-      <Description description="Ready-made Power Automate flows for Brillienta CRM: AppSource lead intake, website leads & demo bookings, new lead alerts, daily sales digest, overdue reminders, case SLA escalation, deal-won handoff and quote discount approval." languagecode="1033" />
+      <Description description="Ready-made Power Automate flows for Brillienta CRM: AppSource lead intake, website leads, demo bookings & support requests, new lead alerts, daily sales digest, overdue reminders, case SLA escalation, deal-won handoff and quote discount approval." languagecode="1033" />
     </Descriptions>
     <Version>${VERSION}</Version>
     <Managed>0</Managed>
