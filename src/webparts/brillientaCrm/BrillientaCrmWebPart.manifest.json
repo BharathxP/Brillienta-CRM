@@ -1,0 +1,33 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/spfx/client-side-web-part-manifest.schema.json",
+  "id": "cd3cf6ef-6aa6-4518-bbfe-20ccba434112",
+  "alias": "BrillientaCrmWebPart",
+  "componentType": "WebPart",
+
+  // The "*" signifies that the version should be taken from the package.json
+  "version": "*",
+  "manifestVersion": 2,
+
+  // If true, the component can only be installed on sites where Custom Script is allowed.
+  // Components that allow authors to embed arbitrary script code should set this to true.
+  // https://support.office.com/en-us/article/Turn-scripting-capabilities-on-or-off-1f2c515f-5d7e-448a-9fd7-835da935584f
+  "requiresCustomScript": false,
+  "supportedHosts": ["SharePointWebPart", "TeamsPersonalApp", "TeamsTab", "SharePointFullPage"],
+  "supportsFullBleed": true,
+  "supportsThemeVariants": true,
+
+  "preconfiguredEntries": [{
+    "groupId": "5c03119e-3074-46fd-976b-c60198311f70", // Advanced
+    "group": { "default": "Advanced" },
+    "title": { "default": "Brillienta CRM" },
+    "description": { "default": "Brillienta CRM: leads, accounts, deals, quotes, demos, cases and forecasts." },
+    "iconImageUrl": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDI0IDEwMjQiIHdpZHRoPSIxMDI0IiBoZWlnaHQ9IjEwMjQiIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iQnJpbGxpZW50YSBDUk0iPjxyZWN0IHdpZHRoPSIxMDI0IiBoZWlnaHQ9IjEwMjQiIHJ4PSIyMjUuMjgiIGZpbGw9IiMwMDhENjIiLz48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgyMjUuMjggMjU3LjAxKSBzY2FsZSgxLjE1KSI+PHBhdGggZmlsbD0iI0M5RjJERiIgZD0iTTIzMyAwSDQ3NUEyMiAyMiAwIDAgMSA0OTcgMjJWMTEwQTIyIDIyIDAgMCAxIDQ3NSAxMzJIMjMzQTY2IDY2IDAgMCAxIDIzMyAwWiIvPjxwYXRoIGZpbGw9IiNGRkZGRkYiIGQ9Ik0xNTAuNSAxNTVIMzkxLjVBMjIgMjIgMCAwIDEgNDEzLjUgMTc3VjI2N0EyMiAyMiAwIDAgMSAzOTEuNSAyODlIMTUwLjVBNjcgNjcgMCAwIDEgMTUwLjUgMTU1WiIvPjxwYXRoIGZpbGw9IiNGRkZGRkYiIGQ9Ik02Ni41IDMwOUgzMDhBMjIgMjIgMCAwIDEgMzMwIDMzMVY0MjBBMjIgMjIgMCAwIDEgMzA4IDQ0Mkg2Ni41QTY2LjUgNjYuNSAwIDAgMSA2Ni41IDMwOVoiLz48L2c+PC9zdmc+",
+    "properties": {
+      "mode": "crm",
+      "title": "Brillienta CRM",
+      "currency": "USD",
+      "defaultTab": "dashboard",
+      "fullScreen": true
+    }
+  }]
+}

@@ -1,0 +1,58 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/spfx-build/package-solution.schema.json",
+  "solution": {
+    "name": "Brillienta CRM",
+    "id": "781af369-4ca4-48a6-86fc-9f40d5ce4d25",
+    "version": "2.0.0.0",
+    "includeClientSideAssets": true,
+    "skipFeatureDeployment": true,
+    "developer": {
+      "name": "Brillienta",
+      "websiteUrl": "https://brillienta.com",
+      "privacyUrl": "https://brillienta.com/privacy",
+      "termsOfUseUrl": "https://brillienta.com/terms",
+      "mpnId": "Undefined-1.24.1"
+    },
+    "metadata": {
+      "shortDescription": {
+        "default": "Enterprise CRM inside SharePoint & Teams: leads, accounts, deals, quotes, demos, cases, forecasting."
+      },
+      "longDescription": {
+        "default": "Brillienta CRM is a complete CRM that runs inside Microsoft 365 and stores all data in your own SharePoint site. Sales: leads with scoring and round-robin assignment, accounts, contacts, opportunities with a drag-and-drop pipeline, products and branded quotes. Marketing: demo requests with Teams meeting scheduling, campaigns with ROI. Service: cases with SLA tracking. Insights: dashboards, forecasting with quotas, reports and a calendar. Integrations: Outlook email, Teams meetings and channel notifications, Microsoft AppSource / Partner Center leads, Power Automate and webhooks, CSV import/export. Enterprise: role-based security, audit log, custom fields."
+      },
+      "screenshotPaths": [],
+      "videoUrl": "",
+      "categories": [
+        "CRM",
+        "Sales + marketing",
+        "Productivity"
+      ]
+    },
+    "features": [
+      {
+        "title": "Brillienta CRM Feature",
+        "description": "Deploys the Brillienta CRM web parts.",
+        "id": "f9fc8365-dd9e-47b7-a0d8-1fdcb4088be1",
+        "version": "1.0.0.0"
+      }
+    ],
+    "webApiPermissionRequests": [
+      {
+        "resource": "Microsoft Graph",
+        "scope": "Mail.Send"
+      },
+      {
+        "resource": "Microsoft Graph",
+        "scope": "Calendars.ReadWrite"
+      },
+      {
+        "resource": "Microsoft Graph",
+        "scope": "User.ReadBasic.All"
+      }
+    ],
+    "iconPath": "images/AppIcon.png"
+  },
+  "paths": {
+    "zippedPackage": "solution/brillienta-crm.sppkg"
+  }
+}

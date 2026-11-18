@@ -1,0 +1,22 @@
+{
+  "@microsoft/generator-sharepoint": {
+    "whichFolder": "subdir",
+    "solutionName": "brillienta-crm",
+    "environment": "spo",
+    "packageManager": "npm",
+    "skipFeatureDeployment": true,
+    "useGulp": false,
+    "componentType": "webpart",
+    "template": "react",
+    "componentName": "BrillientaCrm",
+    "componentDescription": "Leads, demo requests and sales pipeline CRM on SharePoint lists",
+    "plusBeta": false,
+    "isCreatingSolution": true,
+    "nodeVersion": "22.23.5",
+    "sdksVersions": {},
+    "version": "1.24.1",
+    "libraryName": "brillienta-crm",
+    "libraryId": "781af369-4ca4-48a6-86fc-9f40d5ce4d25",
+    "solutionShortDescription": "brillienta-crm description"
+  }
+}

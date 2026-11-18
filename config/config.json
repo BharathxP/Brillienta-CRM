@@ -1,0 +1,18 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/spfx-build/config.2.0.schema.json",
+  "version": "2.0",
+  "bundles": {
+    "brillienta-crm-web-part": {
+      "components": [
+        {
+          "entrypoint": "./lib/webparts/brillientaCrm/BrillientaCrmWebPart.js",
+          "manifest": "./src/webparts/brillientaCrm/BrillientaCrmWebPart.manifest.json"
+        }
+      ]
+    }
+  },
+  "externals": {},
+  "localizedResources": {
+    "BrillientaCrmWebPartStrings": "lib/webparts/brillientaCrm/loc/{locale}.js"
+  }
+}
