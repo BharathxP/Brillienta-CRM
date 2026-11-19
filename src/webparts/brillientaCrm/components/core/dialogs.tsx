@@ -9,6 +9,7 @@ import { useCrm } from '../CrmContext';
 import { DateTimeField, LookupPicker, UserPicker } from './controls';
 import { choicesFor } from './fields';
 import { errorText, parseCsv } from '../utils';
+import { logWhatsApp, waLink, waNumber, waRecipient } from '../../services/WhatsApp';
 
 /* ---------------------------------------------------------------- convert lead */
 
@@ -316,6 +317,61 @@ export const ImportDialog: React.FC<{ entity: EntityKey; onClose: () => void }> 
       <DialogFooter>
         <PrimaryButton text="Import" disabled={!headers.length || !!progress} onClick={() => { run().catch(e => setError(errorText(e))); }} />
         <DefaultButton text={progress && progress.done === rows.length - 1 ? 'Close' : 'Cancel'} onClick={onClose} />
+      </DialogFooter>
+    </Dialog>
+  );
+};
+
+/* ---------------------------------------------------------------- WhatsApp */
+
+export const WhatsAppDialog: React.FC<{ entity: EntityKey; record: IRecord; onClose: () => void }> = ({ entity, record, onClose }) => {
+  const { engine, notify } = useCrm();
+  const wa = engine.settings.whatsapp;
+  const rcpt = waRecipient(engine, entity, record);
+  const [to, setTo] = React.useState(rcpt.number ? `+${rcpt.number}` : '');
+  const [tplId, setTplId] = React.useState<string>('');
+  const [text, setText] = React.useState('');
+  const [useTemplate, setUseTemplate] = React.useState(true);
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string>();
+  const tpl = wa.templates.find(t => t.id === tplId);
+  const number = waNumber(to, wa.defaultCountryCode);
+  const cloud = wa.mode === 'cloud';
+  const pick = (id: string): void => {
+    setTplId(id);
+    const t = wa.templates.find(x => x.id === id);
+    if (t) { setText(engine.fillTemplate(t.body, record)); setUseTemplate(!!t.cloudName); }
+  };
+  const log = (asCloud: boolean): Promise<void> => logWhatsApp(engine, entity, record, number, text, { cloud: asCloud, template: asCloud && useTemplate ? tpl : undefined });
+  const openChat = (): void => {
+    // Open synchronously (pop-up blockers), then log.
+    window.open(waLink(number, text), '_blank', 'noopener');
+    log(false).then(() => { notify('WhatsApp opened and logged on the timeline.'); onClose(); }).catch(e => setError(errorText(e)));
+  };
+  const send = (): void => {
+    setBusy(true);
+    log(true).then(() => { setBusy(false); notify('WhatsApp message queued. Power Automate sends it within a minute.'); onClose(); })
+      .catch(e => { setBusy(false); setError(errorText(e)); });
+  };
+  return (
+    <Dialog hidden={false} onDismiss={onClose} minWidth={480} maxWidth={620}
+      dialogContentProps={{ type: DialogType.normal, title: 'WhatsApp', subText: rcpt.name ? `To ${rcpt.name}` : undefined }}>
+      <Stack tokens={{ childrenGap: 8 }}>
+        {error && <MessageBar messageBarType={MessageBarType.error}>{error}</MessageBar>}
+        <TextField label="WhatsApp number" value={to} placeholder={`+${wa.defaultCountryCode || ''}…`} onChange={(_, v) => setTo(v || '')}
+          errorMessage={to && !number ? 'Enter the number with country code, e.g. +91 98765 43210' : undefined} required />
+        <Dropdown label="Template" placeholder="Choose a template (optional)" selectedKey={tplId || null} options={wa.templates.map(t => ({ key: t.id, text: t.name }))} onChange={(_, o) => pick(String(o?.key))} />
+        <TextField label="Message" multiline rows={5} value={text} onChange={(_, v) => setText(v || '')} />
+        {cloud && tpl?.cloudName && (
+          <Checkbox label={`Send as approved template “${tpl.cloudName}” (needed when the customer has not written in the last 24 hours)`} checked={useTemplate} onChange={(_, c) => setUseTemplate(!!c)} />
+        )}
+        {cloud && <Text variant="small" className="crm-muted">Sent from your WhatsApp Business number by the Power Automate flow “WhatsApp send”. Replies appear on the timeline.</Text>}
+      </Stack>
+      <DialogFooter>
+        {cloud && <PrimaryButton iconProps={{ iconName: 'Send' }} text={busy ? 'Queuing…' : 'Send'} disabled={busy || !number || !text.trim()} onClick={send} />}
+        {cloud ? <DefaultButton iconProps={{ iconName: 'Chat' }} text="Open in WhatsApp" disabled={!number} onClick={openChat} />
+          : <PrimaryButton iconProps={{ iconName: 'Chat' }} text="Open WhatsApp" disabled={!number} onClick={openChat} />}
+        <DefaultButton text="Cancel" onClick={onClose} />
       </DialogFooter>
     </Dialog>
   );

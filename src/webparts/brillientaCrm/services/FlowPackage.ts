@@ -69,8 +69,8 @@ function crc32(data: Uint8Array): number {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-/** Creates a ZIP archive (STORE method, UTF-8 names) from text files. */
-export function zipFiles(files: Record<string, string>): Blob {
+/** Creates a ZIP archive (STORE method, UTF-8 names) from text or binary files. */
+export function zipFiles(files: Record<string, string | Uint8Array>): Blob {
   const enc = new TextEncoder();
   const now = new Date();
   const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | Math.floor(now.getSeconds() / 2);
@@ -82,7 +82,8 @@ export function zipFiles(files: Record<string, string>): Blob {
   const names = Object.keys(files).sort((a, b) => (a === '[Content_Types].xml' ? -1 : b === '[Content_Types].xml' ? 1 : a.localeCompare(b)));
   names.forEach(name => {
     const nameBytes = enc.encode(name);
-    const data = enc.encode(files[name]);
+    const v = files[name];
+    const data = typeof v === 'string' ? enc.encode(v) : v;
     const crc = crc32(data);
     const local = new Uint8Array(30 + nameBytes.length);
     const lv = new DataView(local.buffer);

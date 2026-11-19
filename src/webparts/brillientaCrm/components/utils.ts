@@ -199,3 +199,15 @@ export function fmtShort(v?: string, withTime: boolean = true): string {
   const date = d.toLocaleDateString(undefined, sameYear ? { day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short', year: 'numeric' });
   return withTime ? `${date} ${d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}` : date;
 }
+
+/** Open, not paused (waiting on customer) and past its SLA deadline. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function slaBreached(c: Record<string, any>): boolean {
+  return c.caseStatus !== 'Resolved' && c.caseStatus !== 'Closed' && !c.slaPausedAt && isOverdue(c.slaDue);
+}
+
+/** Open case whose first response is late. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function firstResponseLate(c: Record<string, any>): boolean {
+  return c.caseStatus === 'New' && !c.firstRespondedAt && isOverdue(c.firstResponseDue);
+}

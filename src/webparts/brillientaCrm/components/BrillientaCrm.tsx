@@ -19,7 +19,8 @@ import { CalendarPage, ForecastPage, ReportsPage } from './pages/Insights';
 import { SettingsPage } from './pages/SettingsPage';
 import { AuditLogPage, SetupPage } from './pages/AdminPages';
 import { DemoRequestForm } from './DemoRequestForm';
-import { errorText, isOverdue, lsGet, lsSet } from './utils';
+import { errorText, isOverdue, lsGet, slaBreached, lsSet } from './utils';
+import { syncOutlook, syncState } from '../services/OutlookSync';
 import { LOGO_DARK, LOGO_LIGHT, MARK, MARK_DARK } from './logo';
 import styles from './BrillientaCrm.module.scss';
 
@@ -190,6 +191,37 @@ const BrillientaCrm: React.FC<IBrillientaCrmProps> = props => {
 
   React.useEffect(() => { init().catch(() => undefined); }, [init]);
 
+  // Automatic Outlook logging (per-user opt-in): on open and every 15 minutes while the CRM is open.
+  React.useEffect(() => {
+    if (phase !== 'ready' || props.mode === 'demoForm') { return undefined; }
+    const run = (): void => {
+      const id = engine.me?.id;
+      if (!engine.settings.integrations.outlookSync || !engine.graph.available || !syncState.enabled(id)) { return; }
+      const last = syncState.last(id);
+      if (last && Date.now() - new Date(last).getTime() < 14 * 60000) { return; }
+      syncOutlook(engine).then(r => {
+        if (r.emails || r.meetings) { notify(`Outlook: logged ${r.emails} email(s) and ${r.meetings} meeting(s).`, MessageBarType.success); }
+      }).catch(e => console.warn('Outlook sync failed', errorText(e)));
+    };
+    const first = setTimeout(run, 4000);
+    const timer = setInterval(run, 15 * 60000);
+    return () => { clearTimeout(first); clearInterval(timer); };
+  }, [phase]);
+
+  // Billing housekeeping (renewal opportunities, overdue invoices, expiries) when a manager/admin opens the CRM.
+  React.useEffect(() => {
+    if (phase !== 'ready' || props.mode === 'demoForm') { return undefined; }
+    const t = setTimeout(() => {
+      engine.processSignedQuotes().then(n => { if (n) { notify(`${n} quote(s) answered by e-signature.`, MessageBarType.success); } }).catch(e => console.warn('Signed quotes', errorText(e)));
+      engine.normalizeCases().catch(e => console.warn('Case SLA update failed', errorText(e)));
+      engine.runMaintenance().then(r => {
+        const parts = [r.renewals && `${r.renewals} renewal opportunit${r.renewals === 1 ? 'y' : 'ies'} created`, r.overdue && `${r.overdue} invoice(s) now overdue`, r.expired && `${r.expired} subscription(s) expired`].filter(Boolean);
+        if (parts.length) { notify(`Billing: ${parts.join(', ')}.`, MessageBarType.info); }
+      }).catch(e => console.warn('Billing maintenance failed', errorText(e)));
+    }, 2500);
+    return () => clearTimeout(t);
+  }, [phase]);
+
   const updateSettings = async (s: ICrmSettings): Promise<void> => {
     await engine.ds.saveSettings(s);
     const license = await evaluateLicense(s.licenseKey, props.tenantId, s.installDate);
@@ -257,7 +289,7 @@ const BrillientaCrm: React.FC<IBrillientaCrmProps> = props => {
   // ------------------------------------------------------------------ navigation
   const me = engine.me?.id;
   const myOverdue = (data.activities || []).filter(a => a.activityType === 'Task' && !a.completed && a.owner?.id === me && isOverdue(a.dueDate));
-  const myBreached = (data.cases || []).filter(c => c.owner?.id === me && c.caseStatus !== 'Resolved' && c.caseStatus !== 'Closed' && isOverdue(c.slaDue));
+  const myBreached = (data.cases || []).filter(c => c.owner?.id === me && slaBreached(c));
   const lastSeen = lsGet<string>('brillienta-crm:last-seen', '');
   const newForMe = (data.leads || []).filter(l => l.owner?.id === me && l.status === 'New' && (!lastSeen || String(l.created) > lastSeen));
   const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);

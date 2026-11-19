@@ -1,3 +1,4 @@
+import { ACCOUNTING_FORMATS, exportInvoices } from '../../services/Accounting';
 import * as React from 'react';
 import {
   CommandBar, ICommandBarItemProps, SearchBox, Dropdown, Stack, Text, IColumn, Selection, SelectionMode, ShimmeredDetailsList,
@@ -160,6 +161,12 @@ export const EntityGrid: React.FC<{ entity: EntityKey; title?: string; initialFi
           items: [
             { key: 'cols', text: 'Choose columns', iconProps: { iconName: 'TripleColumn' }, onClick: () => setDialog('cols') },
             { key: 'export', text: 'Export to CSV / Excel', iconProps: { iconName: 'ExcelDocument' }, onClick: doExport },
+            ...(entity === 'invoices' ? [{ key: 'acct', text: `Export for accounting${sel ? ` (${sel} selected)` : ''}`, iconProps: { iconName: 'Financial' }, subMenuProps: {
+              items: ACCOUNTING_FORMATS.map(f => ({ key: f.key, text: f.text, onClick: () => {
+                const n = exportInvoices(engine, sel ? selected : filtered, f.key);
+                notify(n ? `Exported ${n} row(s) for ${f.text}.` : 'Nothing to export.', n ? MessageBarType.success : MessageBarType.warning);
+              } }))
+            } }] : []),
             ...(engine.can('import', entity) ? [{ key: 'import', text: 'Import from CSV', iconProps: { iconName: 'Upload' }, onClick: () => setDialog('import') }] : []),
             ...(entity === 'leads' && engine.can('import', entity) ? [{ key: 'rescore', text: 'Recalculate lead scores', iconProps: { iconName: 'Calculator' }, onClick: () => {
               engine.rescoreLeads().then(n => notify(`${n} lead score(s) updated.`, MessageBarType.success)).catch(e => notify(errorText(e), MessageBarType.error));

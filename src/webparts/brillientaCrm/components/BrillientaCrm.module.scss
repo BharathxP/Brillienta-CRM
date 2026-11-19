@@ -154,6 +154,8 @@
     .crm-num { text-align: right; font-variant-numeric: tabular-nums; }
     .crm-import-map { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; max-height: 300px; overflow-y: auto; align-items: center; }
 
+    .crm-sync-bar { padding: 8px 12px; border: 1px solid var(--crm-border); border-radius: 8px; background: var(--crm-surface-2); }
+
     /* ---------- filter bar ---------- */
     .crm-filterbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
     .crm-filter-search { width: 260px; }
@@ -174,6 +176,13 @@
 
     /* ---------- settings tables ---------- */
     .crm-stage-table { display: grid; grid-template-columns: minmax(140px, 2fr) 110px 140px auto; gap: 6px 8px; align-items: center; margin-top: 8px; }
+    .crm-smart { border: 1px solid var(--crm-border); border-left: 3px solid var(--crm-accent, #008D62); border-radius: 6px; padding: 10px 12px; margin: 12px 0 4px; background: var(--crm-card, transparent); }
+    .crm-smart-list { margin: 8px 0 10px; padding-left: 18px; font-size: 13px; line-height: 1.5; }
+    .crm-smart-list li { overflow-wrap: anywhere; }
+    .crm-smart-risk { color: var(--crm-danger, #a4262c); list-style: none; margin-left: -18px; }
+    .crm-smart-next { color: var(--crm-accent, #008D62); list-style: none; margin-left: -18px; }
+    .crm-wa-tpl { border: 1px solid var(--crm-border); border-radius: 6px; padding: 4px 10px 10px; }
+    .crm-sla-table { display: grid; grid-template-columns: minmax(70px, 1fr) minmax(70px, 110px) minmax(70px, 110px); gap: 6px 8px; align-items: center; margin-bottom: 10px; }
     .crm-stage-head { font-size: 12px; font-weight: 600; color: var(--crm-subtle); }
     .crm-narrow .crm-stage-table { grid-template-columns: minmax(0, 1fr) 70px auto; }
     .crm-narrow .crm-stage-table .crm-stage-forecast, .crm-narrow .crm-stage-table .crm-stage-head-forecast { display: none; }

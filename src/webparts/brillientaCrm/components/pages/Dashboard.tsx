@@ -4,7 +4,7 @@ import { IRecord, LOST, WON } from '../../models/model';
 import { useCrm, useEntities } from '../CrmContext';
 import { BarList, ColumnChart, Donut, Funnel } from '../core/charts';
 import { Pill, ScoreBadge } from '../core/controls';
-import { fmtDate, fmtMoney, groupCount, inRange, isOverdue, monthLabel, quarterRange, sum } from '../utils';
+import { fmtDate, fmtMoney, groupCount, inRange, isOverdue, monthLabel, slaBreached, quarterRange, sum } from '../utils';
 
 const Kpi: React.FC<{ label: string; value: string | number; hint?: string; icon: string; onClick?: () => void; delta?: number }> = p => (
   <div className="crm-kpi" onClick={p.onClick} role={p.onClick ? 'button' : undefined} tabIndex={p.onClick ? 0 : undefined}
@@ -33,7 +33,7 @@ export const Card: React.FC<{ title: string; action?: React.ReactNode; children?
 
 export const Dashboard: React.FC = () => {
   const { engine, currency, navigate, open, settings } = useCrm();
-  const { rows } = useEntities('leads', 'opportunities', 'demos', 'activities', 'cases', 'accounts');
+  const { rows } = useEntities('leads', 'opportunities', 'demos', 'activities', 'cases', 'accounts', 'subscriptions', 'invoices');
   const [scope, setScope] = React.useState<'all' | 'me'>(engine.role === 'sales' ? 'me' : 'all');
   const mine = (r: IRecord): boolean => scope === 'all' || r.owner?.id === engine.me?.id;
   const leads = rows('leads').filter(mine);
@@ -55,7 +55,12 @@ export const Dashboard: React.FC = () => {
   const leadsQ = leads.filter(l => inRange(l.created, q.start, q.end)).length;
   const leadsPQ = leads.filter(l => inRange(l.created, pq.start, pq.end)).length;
   const openCases = cases.filter(c => c.caseStatus !== 'Resolved' && c.caseStatus !== 'Closed');
-  const breached = openCases.filter(c => isOverdue(c.slaDue));
+  const breached = openCases.filter(c => slaBreached(c));
+  const liveSubs = rows('subscriptions').filter(mine).filter(x => x.subStatus === 'Active' || x.subStatus === 'Pending renewal');
+  const mrr = sum(liveSubs, x => x.mrr);
+  const renewSoon = liveSubs.filter(x => x.renewalDate && new Date(x.renewalDate).getTime() - Date.now() < settings.renewals.leadDays * 86400000);
+  const unpaid = rows('invoices').filter(mine).filter(x => x.invoiceStatus === 'Sent' || x.invoiceStatus === 'Overdue');
+  const overdueInv = unpaid.filter(x => x.invoiceStatus === 'Overdue');
 
   // revenue won by month, last 12 months
   const months: { label: string; value: number; short?: string }[] = [];
@@ -95,6 +100,8 @@ export const Dashboard: React.FC = () => {
         <Kpi icon="People" label={`New leads ${q.label}`} value={leadsQ} delta={leadsPQ ? ((leadsQ - leadsPQ) / leadsPQ) * 100 : undefined} hint={`${leads.filter(l => l.status === 'New').length} still new`} onClick={() => navigate('entity:leads')} />
         <Kpi icon="Presentation" label="Demos to schedule" value={demos.filter(d => d.status === 'Requested').length} hint={`${upcoming.length} upcoming`} onClick={() => navigate('entity:demos')} />
         <Kpi icon="Org" label="Win rate" value={`${winRate}%`} hint={`${closed.length} closed deals`} onClick={() => navigate('reports')} />
+        {liveSubs.length > 0 && <Kpi icon="RecurringEvent" label="MRR" value={money(mrr)} hint={`ARR ${money(mrr * 12)} · ${renewSoon.length} renewal${renewSoon.length === 1 ? '' : 's'} due`} onClick={() => navigate('entity:subscriptions')} />}
+        {(unpaid.length > 0 || rows('invoices').length > 0) && <Kpi icon="Money" label="Unpaid invoices" value={money(sum(unpaid, x => (x.grandTotal || 0) - (x.amountPaid || 0)))} hint={overdueInv.length ? `${overdueInv.length} overdue` : `${unpaid.length} open`} onClick={() => navigate('entity:invoices')} />}
         {engine.hasFeature('cases') && <Kpi icon="Headset" label="Open cases" value={openCases.length} hint={breached.length ? `${breached.length} SLA breached` : 'all within SLA'} onClick={() => navigate('entity:cases')} />}
       </div>
 

@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const VERSION = '1.3.1.0';
+const VERSION = '1.4.0.0';
 const SOLUTION = 'BrillientaCRMFlows';
 const PREFIX = 'bri';
 
@@ -25,6 +25,14 @@ const ENV = {
   finance: { schema: `${PREFIX}_FinanceEmail`, name: 'Finance email', def: 'finance@contoso.com', desc: 'Notified when a deal is won.' },
   support: { schema: `${PREFIX}_SupportManagerEmail`, name: 'Support manager email', def: 'support.manager@contoso.com', desc: 'Notified when a case breaches its SLA.' },
   key: { schema: `${PREFIX}_WebsiteKey`, name: 'Website shared key', def: 'off', desc: 'Same value as CRM_WEBHOOK_KEY (or LEAD_WEBHOOK_KEY) in Vercel; checked against the x-lead-key header. "off" accepts every request.' },
+  rzpId: { schema: `${PREFIX}_RazorpayKeyId`, name: 'Razorpay key id', def: 'not-set', desc: 'Razorpay Dashboard › Account & Settings › API keys (rzp_live_… or rzp_test_…). Leave empty if you do not use Razorpay.' },
+  rzpSecret: { schema: `${PREFIX}_RazorpayKeySecret`, name: 'Razorpay key secret', def: 'not-set', desc: 'Razorpay key secret. Treat as a password: restrict who can edit these flows, or switch this variable to an Azure Key Vault secret.' },
+  stripeKey: { schema: `${PREFIX}_StripeSecretKey`, name: 'Stripe secret key', def: 'not-set', desc: 'Stripe restricted key (rk_…) with write access to Prices and Payment Links and read access to Checkout Sessions. Leave empty if you do not use Stripe.' },
+  waPhoneId: { schema: `${PREFIX}_WhatsAppPhoneNumberId`, name: 'WhatsApp phone number ID', def: 'not-set', desc: 'Meta › WhatsApp › API setup › Phone number ID of your WhatsApp Business number.' },
+  waToken: { schema: `${PREFIX}_WhatsAppAccessToken`, name: 'WhatsApp access token', def: 'not-set', desc: 'Permanent System User access token with whatsapp_business_messaging. Treat as a password (consider an Azure Key Vault secret).' },
+  waVerify: { schema: `${PREFIX}_WhatsAppVerifyToken`, name: 'WhatsApp webhook verify token', def: 'not-set', desc: 'Any long random text; enter the same value as the Verify token in Meta › WhatsApp › Configuration › Webhook.' },
+  mailbox: { schema: `${PREFIX}_SupportMailbox`, name: 'Support mailbox', def: 'support@contoso.com', desc: 'Shared mailbox watched by the Email to case flow (the flow connection needs Full Access or Send As on it).' },
+  casePrefix: { schema: `${PREFIX}_CasePrefix`, name: 'Case number prefix', def: 'CS', desc: 'Same as Settings › Company › Case number prefix in the CRM. New email cases are numbered PREFIX-YEAR-ID.' },
   library: { schema: `${PREFIX}_CustomerFolderLibrary`, name: 'Customer folder library', def: 'Documents', desc: 'Document library (on the CRM site) where a folder is created for every won customer.' }
 };
 const pname = (k) => `${ENV[k].name} (${ENV[k].schema})`;
@@ -35,13 +43,14 @@ const Pi = (k) => `@{parameters('${pname(k)}')}`;
 const CONN = {
   sp: { api: 'shared_sharepointonline', ref: `${PREFIX}_BrillientaCRM_SharePoint`, display: 'Brillienta CRM – SharePoint' },
   outlook: { api: 'shared_office365', ref: `${PREFIX}_BrillientaCRM_Outlook`, display: 'Brillienta CRM – Office 365 Outlook' },
+  conv: { api: 'shared_conversionservice', ref: `${PREFIX}_BrillientaCRM_ContentConversion`, display: 'Brillienta CRM – Content Conversion' },
   approvals: { api: 'shared_approvals', ref: `${PREFIX}_BrillientaCRM_Approvals`, display: 'Brillienta CRM – Approvals' }
 };
 const host = (c, op) => ({ connectionName: CONN[c].api, operationId: op, apiId: `/providers/Microsoft.PowerApps/apis/${CONN[c].api}` });
 const api = (c, op, parameters, runAfter = {}, extra = {}) => ({
   runAfter, type: 'OpenApiConnection', inputs: { host: host(c, op), parameters, authentication: "@parameters('$authentication')" }, ...extra
 });
-const LISTS = { demos: 'CRM Demo Requests', leads: 'AppSource Leads', accounts: 'CRM Accounts', opps: 'CRM Opportunities', quotes: 'CRM Quotes', cases: 'CRM Cases', acts: 'CRM Activities' };
+const LISTS = { demos: 'CRM Demo Requests', leads: 'AppSource Leads', accounts: 'CRM Accounts', opps: 'CRM Opportunities', quotes: 'CRM Quotes', cases: 'CRM Cases', acts: 'CRM Activities', invoices: 'CRM Invoices', subs: 'CRM Subscriptions', contacts: 'CRM Contacts' };
 
 const getItems = (list, filter, runAfter = {}, top = 500) =>
   api('sp', 'GetItems', { dataset: P('site'), table: LISTS[list], '$filter': filter, '$top': top }, runAfter);
@@ -182,7 +191,8 @@ Page: @{coalesce(${L('page')}, '')}   Landing page: @{coalesce(${L('landing_page
               'item/CaseStatus/Value': 'New',
               'item/Category/Value': `@{if(equals(${L('request_type')}, 'Issue'), 'Problem', if(equals(${L('request_type')}, 'Feature request'), 'Feature request', if(equals(${L('request_type')}, 'Licence & billing'), 'Billing', 'Question')))}`,
               'item/Origin/Value': 'Web',
-              'item/SlaDue': "@{addHours(utcNow(), if(equals(outputs('Priority'), 'Critical'), 4, if(equals(outputs('Priority'), 'High'), 8, if(equals(outputs('Priority'), 'Low'), 72, 24))))}",
+              // SLA deadlines are calculated by the CRM (business hours, first response) when support opens it.
+              'item/RequesterEmail': `@{toLower(${L('email')})}`,
               'item/ContactRef': "@first(coalesce(body('Find_contact')?['value'], createArray()))?['ID']",
               'item/AccountRef': "@first(coalesce(body('Find_contact')?['value'], createArray()))?['AccountRef']",
               'item/Description': `From: @{outputs('Full_name')} <@{${L('email')}}> · @{coalesce(${L('company')}, '')}\n\n@{outputs('Details')}`
@@ -443,6 +453,509 @@ flow('Brillienta CRM - Quote discount approval',
       html("Quote @{triggerOutputs()?['body/QuoteNumber']}: @{if(equals(body('Ask_approval')?['outcome'], 'Approve'), 'approved ✔', 'rejected ✖')}",
         "<p>Comments: @{coalesce(body('Ask_approval')?['responses']?[0]?['comments'], '—')}</p>"),
       { Approved: ['Succeeded'] })
+  });
+
+
+// ------------------------------------------------------------------ payments (Razorpay / Stripe)
+const T = (k) => `triggerOutputs()?['body/${k}']`;
+const balance = `sub(float(coalesce(${T('GrandTotal')}, 0)), float(coalesce(${T('AmountPaid')}, 0)))`;
+const minor = `int(formatNumber(mul(${balance}, 100), '0', 'en-US'))`;
+const http = (method, uri, headers, body, runAfter = {}, extra = {}) => ({
+  runAfter, type: 'Http', inputs: { method, uri, headers, ...(body !== undefined ? { body } : {}), ...extra }
+});
+const patchInvoice = (id, fields, runAfter = {}) => api('sp', 'PatchItem', { dataset: P('site'), table: LISTS.invoices, id, ...fields }, runAfter);
+const logInvoice = (id, title, details, runAfter) => api('sp', 'PostItem', {
+  dataset: P('site'), table: LISTS.acts, 'item/Title': title, 'item/Details': details, 'item/ActivityType/Value': 'Note',
+  'item/RelatedType': 'Invoice', 'item/RelatedId': id, 'item/Completed': true, 'item/ActivitySource/Value': 'Flow'
+}, runAfter);
+const linkRequested = (provider) => spPoll('GetOnUpdatedItems', 'invoices', [
+  `@equals(${T('PaymentLinkStatus/Value')}, 'Requested')`, `@equals(${T('PaymentProvider/Value')}, '${provider}')`
+]);
+const contactLookup = {
+  Contact_email: { runAfter: {}, type: 'InitializeVariable', inputs: { variables: [{ name: 'contactEmail', type: 'string', value: '' }] } },
+  Has_contact: {
+    runAfter: { Contact_email: ['Succeeded'] }, type: 'If', expression: { and: [{ greater: [`@coalesce(${T('ContactRef')}, 0)`, 0] }] },
+    actions: {
+      Get_contact: api('sp', 'GetItem', { dataset: P('site'), table: 'CRM Contacts', id: `@${T('ContactRef')}` }),
+      Use_contact_email: { runAfter: { Get_contact: ['Succeeded'] }, type: 'SetVariable', inputs: { name: 'contactEmail', value: "@{coalesce(body('Get_contact')?['Email'], '')}" } }
+    },
+    else: { actions: {} }
+  }
+};
+const respond = (status, runAfter) => ({ runAfter, type: 'Response', kind: 'Http', inputs: { statusCode: status } });
+const webhookTrigger = { manual: { type: 'Request', kind: 'Http', inputs: { triggerAuthenticationType: 'All', method: 'POST', schema: { type: 'object' } } } };
+const markPaid = (lookupFilter, amountExpr, provider, reference, runAfter) => ({
+  Find_invoice: getItems('invoices', lookupFilter, runAfter, 1),
+  For_the_invoice: {
+    runAfter: { Find_invoice: ['Succeeded'] }, type: 'Foreach', foreach: "@body('Find_invoice')?['value']",
+    actions: {
+      Mark_paid: patchInvoice("@items('For_the_invoice')?['ID']", {
+        'item/Title': "@items('For_the_invoice')?['Title']", 'item/InvoiceStatus/Value': 'Paid', 'item/PaidDate': '@utcNow()',
+        'item/AmountPaid': `@add(float(coalesce(items('For_the_invoice')?['AmountPaid'], 0)), ${amountExpr})`, 'item/PaymentProvider/Value': provider
+      }),
+      Log_payment: logInvoice("@items('For_the_invoice')?['ID']", `Payment received via ${provider}`, `@{${amountExpr}} · ${reference}`, { Mark_paid: ['Succeeded'] })
+    }
+  }
+});
+
+// 9 — Razorpay payment link
+flow('Brillienta CRM - Razorpay payment link',
+  'When "Create Razorpay link" is clicked on an invoice: creates a Razorpay Payment Link for the balance (reference = invoice number), emails it to the billing contact and writes the short URL back to the invoice. Requires Power Automate Premium (HTTP).',
+  ['sp'], ['site', 'rzpId', 'rzpSecret'],
+  { When_a_link_is_requested: linkRequested('Razorpay') },
+  {
+    ...contactLookup,
+    Create_link: http('POST', 'https://api.razorpay.com/v1/payment_links', { 'Content-Type': 'application/json' }, {
+      amount: `@${minor}`, currency: "@{coalesce(" + T('Currency') + ", 'INR')}", accept_partial: false,
+      reference_id: `@{${T('InvoiceNumber')}}`, description: `Invoice @{${T('InvoiceNumber')}} - @{${T('Title')}}`,
+      customer: { email: "@{variables('contactEmail')}" }, notify: { email: "@not(empty(variables('contactEmail')))", sms: false }, reminder_enable: true,
+      notes: { crm_invoice_id: `@{${T('ID')}}` }
+    }, { Has_contact: ['Succeeded'] }, { authentication: { type: 'Basic', username: P('rzpId'), password: P('rzpSecret') } }),
+    Save_link: patchInvoice(`@${T('ID')}`, {
+      'item/Title': `@${T('Title')}`, 'item/PaymentLink': "@body('Create_link')?['short_url']",
+      'item/ExternalPaymentId': "@body('Create_link')?['id']", 'item/PaymentLinkStatus/Value': 'Created'
+    }, { Create_link: ['Succeeded'] }),
+    Save_failure: patchInvoice(`@${T('ID')}`, { 'item/Title': `@${T('Title')}`, 'item/PaymentLinkStatus/Value': 'Failed' }, { Create_link: ['Failed', 'TimedOut'] }),
+    Log_failure: logInvoice(`@${T('ID')}`, 'Razorpay payment link failed', "@{body('Create_link')}", { Save_failure: ['Succeeded'] })
+  });
+
+// 10 — Razorpay payment received
+flow('Brillienta CRM - Razorpay payment received',
+  'Razorpay webhook (event payment_link.paid). The payment link is re-read from the Razorpay API before the invoice is marked Paid, so forged webhook calls are ignored. Requires Power Automate Premium (HTTP trigger).',
+  ['sp'], ['site', 'rzpId', 'rzpSecret'],
+  webhookTrigger,
+  {
+    Link_id: { runAfter: {}, type: 'Compose', inputs: "@{coalesce(triggerBody()?['payload']?['payment_link']?['entity']?['id'], '')}" },
+    Is_link_event: {
+      runAfter: { Link_id: ['Succeeded'] }, type: 'If',
+      expression: { and: [{ equals: ["@triggerBody()?['event']", 'payment_link.paid'] }, { startsWith: ["@outputs('Link_id')", 'plink_'] }] },
+      actions: {
+        Verify_link: http('GET', "https://api.razorpay.com/v1/payment_links/@{outputs('Link_id')}", {}, undefined, {}, { authentication: { type: 'Basic', username: P('rzpId'), password: P('rzpSecret') } }),
+        Is_paid: {
+          runAfter: { Verify_link: ['Succeeded'] }, type: 'If',
+          expression: { and: [{ equals: ["@body('Verify_link')?['status']", 'paid'] }] },
+          actions: markPaid("ExternalPaymentId eq '@{outputs('Link_id')}'", "div(float(body('Verify_link')?['amount_paid']), 100)", 'Razorpay', "@{outputs('Link_id')}", {}),
+          else: { actions: {} }
+        }
+      },
+      else: { actions: {} }
+    },
+    Response: respond(200, { Is_link_event: ['Succeeded', 'Failed', 'Skipped', 'TimedOut'] })
+  });
+
+// 11 — Stripe payment link
+const stripeAuth = { Authorization: `Bearer ${Pi('stripeKey')}`, 'Content-Type': 'application/x-www-form-urlencoded' };
+flow('Brillienta CRM - Stripe payment link',
+  'When "Create Stripe link" is clicked on an invoice: creates a Stripe Price and Payment Link for the balance and writes the URL back to the invoice. Requires Power Automate Premium (HTTP).',
+  ['sp'], ['site', 'stripeKey'],
+  { When_a_link_is_requested: linkRequested('Stripe') },
+  {
+    Create_price: http('POST', 'https://api.stripe.com/v1/prices', stripeAuth,
+      `currency=@{toLower(coalesce(${T('Currency')}, 'usd'))}&unit_amount=@{${minor}}&product_data[name]=@{encodeUriComponent(concat('Invoice ', ${T('InvoiceNumber')}))}`),
+    Create_link: http('POST', 'https://api.stripe.com/v1/payment_links', stripeAuth,
+      `line_items[0][price]=@{body('Create_price')?['id']}&line_items[0][quantity]=1&metadata[invoice]=@{encodeUriComponent(${T('InvoiceNumber')})}&metadata[crm_invoice_id]=@{${T('ID')}}&payment_intent_data[metadata][invoice]=@{encodeUriComponent(${T('InvoiceNumber')})}`,
+      { Create_price: ['Succeeded'] }),
+    Save_link: patchInvoice(`@${T('ID')}`, {
+      'item/Title': `@${T('Title')}`, 'item/PaymentLink': "@body('Create_link')?['url']",
+      'item/ExternalPaymentId': "@body('Create_link')?['id']", 'item/PaymentLinkStatus/Value': 'Created'
+    }, { Create_link: ['Succeeded'] }),
+    Save_failure: patchInvoice(`@${T('ID')}`, { 'item/Title': `@${T('Title')}`, 'item/PaymentLinkStatus/Value': 'Failed' }, { Create_link: ['Failed', 'TimedOut', 'Skipped'] }),
+    Log_failure: logInvoice(`@${T('ID')}`, 'Stripe payment link failed', "@{coalesce(body('Create_link'), body('Create_price'))}", { Save_failure: ['Succeeded'] })
+  });
+
+// 12 — Stripe payment received
+flow('Brillienta CRM - Stripe payment received',
+  'Stripe webhook (event checkout.session.completed). The Checkout Session is re-read from the Stripe API before the invoice is marked Paid, so forged webhook calls are ignored. Requires Power Automate Premium (HTTP trigger).',
+  ['sp'], ['site', 'stripeKey'],
+  webhookTrigger,
+  {
+    Session_id: { runAfter: {}, type: 'Compose', inputs: "@{coalesce(triggerBody()?['data']?['object']?['id'], '')}" },
+    Is_checkout_event: {
+      runAfter: { Session_id: ['Succeeded'] }, type: 'If',
+      expression: { and: [{ equals: ["@triggerBody()?['type']", 'checkout.session.completed'] }, { startsWith: ["@outputs('Session_id')", 'cs_'] }] },
+      actions: {
+        Verify_session: http('GET', "https://api.stripe.com/v1/checkout/sessions/@{outputs('Session_id')}", { Authorization: `Bearer ${Pi('stripeKey')}` }),
+        Is_paid: {
+          runAfter: { Verify_session: ['Succeeded'] }, type: 'If',
+          expression: { and: [{ equals: ["@body('Verify_session')?['payment_status']", 'paid'] }] },
+          actions: markPaid("ExternalPaymentId eq '@{body('Verify_session')?['payment_link']}'", "div(float(body('Verify_session')?['amount_total']), 100)", 'Stripe', "@{outputs('Session_id')}", {}),
+          else: { actions: {} }
+        }
+      },
+      else: { actions: {} }
+    },
+    Response: respond(200, { Is_checkout_event: ['Succeeded', 'Failed', 'Skipped', 'TimedOut'] })
+  });
+
+
+// 13 — Email to case
+const M = (k) => `triggerOutputs()?['body/${k}']`;
+const ESC = (e) => `replace(${e}, , '')`;
+flow('Brillienta CRM - Email to case',
+  'Watches the support shared mailbox. Replies that carry a case number in the subject (e.g. [CS-2026-0042]) are logged on that case and re-open it; other emails create a new case (contact and account matched by sender), numbered PREFIX-YEAR-ID, with an automatic acknowledgement. The CRM then sets business-hours SLA deadlines.',
+  ['sp', 'outlook', 'conv'], ['site', 'page', 'mailbox', 'casePrefix', 'support'],
+  {
+    When_an_email_arrives: {
+      recurrence: { interval: 3, frequency: 'Minute' },
+      splitOn: "@triggerOutputs()?['body/value']",
+      type: 'OpenApiConnection',
+      inputs: {
+        host: host('outlook', 'SharedMailboxOnNewEmailV2'),
+        parameters: { mailboxAddress: P('mailbox'), folderId: 'Inbox', importance: 'Any', includeAttachments: false },
+        authentication: "@parameters('$authentication')"
+      }
+    }
+  },
+  {
+    Subject: { runAfter: {}, type: 'Compose', inputs: `@{coalesce(${M('subject')}, '(no subject)')}` },
+    Sender: { runAfter: {}, type: 'Compose', inputs: `@{toLower(coalesce(${M('from')}, ''))}` },
+    Tag: { runAfter: { Subject: ['Succeeded'] }, type: 'Compose', inputs: "@{if(and(contains(outputs('Subject'), '['), contains(outputs('Subject'), ']')), trim(first(split(split(outputs('Subject'), '[')[1], ']'))), '')}" },
+    Case_id: { runAfter: {}, type: 'InitializeVariable', inputs: { variables: [{ name: 'caseId', type: 'integer', value: 0 }] } },
+    Plain_text: api('conv', 'HtmlToText', { Content: `@{coalesce(${M('body')}, '')}` }, {}),
+    Not_automated: {
+      runAfter: { Sender: ['Succeeded'], Tag: ['Succeeded'], Case_id: ['Succeeded'], Plain_text: ['Succeeded', 'Failed'] }, type: 'If',
+      expression: { and: [
+        { not: { equals: ["@outputs('Sender')", `@toLower(${P('mailbox').slice(1)})`] } },
+        { not: { contains: ["@outputs('Sender')", 'noreply'] } }, { not: { contains: ["@outputs('Sender')", 'no-reply'] } },
+        { not: { contains: ["@outputs('Sender')", 'mailer-daemon'] } },
+        { not: { startsWith: ["@toLower(outputs('Subject'))", 'automatic reply'] } }, { not: { startsWith: ["@toLower(outputs('Subject'))", 'out of office'] } }
+      ] },
+      actions: {
+        Email_text: { runAfter: {}, type: 'Compose', inputs: `@{take(coalesce(body('Plain_text'), ${M('bodyPreview')}, ''), 60000)}` },
+        Has_tag: {
+          runAfter: { Email_text: ['Succeeded'] }, type: 'If', expression: { and: [{ not: { equals: ["@outputs('Tag')", ''] } }] },
+          actions: {
+            Find_case: getItems('cases', `CaseNumber eq '@{${ESC("outputs('Tag')")}}'`, {}, 1),
+            Remember_case: { runAfter: { Find_case: ['Succeeded'] }, type: 'SetVariable', inputs: { name: 'caseId', value: "@coalesce(first(body('Find_case')?['value'])?['ID'], 0)" } }
+          },
+          else: { actions: {} }
+        },
+        Existing_case: {
+          runAfter: { Has_tag: ['Succeeded'] }, type: 'If', expression: { and: [{ greater: ["@variables('caseId')", 0] }] },
+          actions: {
+            Log_reply: api('sp', 'PostItem', {
+              dataset: P('site'), table: LISTS.acts, 'item/Title': "@{take(concat('Received: ', outputs('Subject')), 255)}",
+              'item/Details': "From: @{outputs('Sender')}\n\n@{outputs('Email_text')}", 'item/ActivityType/Value': 'Email',
+              'item/RelatedType': 'Case', 'item/RelatedId': "@variables('caseId')", 'item/Completed': true, 'item/DueDate': '@utcNow()',
+              'item/ActivitySource/Value': 'Outlook', 'item/ExternalId': `@{take(concat('mail:', coalesce(${M('internetMessageId')}, ${M('id')}), '|cases:', variables('caseId')), 255)}`
+            }),
+            Needs_reopen: {
+              runAfter: { Log_reply: ['Succeeded'] }, type: 'If',
+              expression: { and: [{ contains: ["@createArray('Resolved', 'Closed', 'Waiting on customer')", "@first(body('Find_case')?['value'])?['CaseStatus']?['Value']"] }] },
+              actions: {
+                Reopen: api('sp', 'PatchItem', {
+                  dataset: P('site'), table: LISTS.cases, id: "@variables('caseId')", 'item/Title': "@first(body('Find_case')?['value'])?['Title']", 'item/CaseStatus/Value': 'In progress'
+                }),
+                Tell_owner: email(`@{coalesce(first(body('Find_case')?['value'])?['CaseOwner']?['Email'], ${P('support').slice(1)})}`,
+                  "Customer replied: @{outputs('Tag')} @{first(body('Find_case')?['value'])?['Title']}",
+                  html("A customer replied to @{outputs('Tag')} — the case is open again", `<table>${tr('From', "@{outputs('Sender')}")}${tr('Subject', "@{outputs('Subject')}")}</table><p>@{take(outputs('Email_text'), 2000)}</p>`),
+                  { Reopen: ['Succeeded'] })
+              },
+              else: { actions: {} }
+            }
+          },
+          else: {
+            actions: {
+              Find_contact: getItems('contacts', "Email eq '@{" + ESC("outputs('Sender')") + "}'", {}, 1),
+              Create_case: api('sp', 'PostItem', {
+                dataset: P('site'), table: LISTS.cases, 'item/Title': "@{take(outputs('Subject'), 255)}",
+                'item/Priority/Value': `@{if(equals(toLower(coalesce(${M('importance')}, '')), 'high'), 'High', 'Normal')}`,
+                'item/CaseStatus/Value': 'New', 'item/Origin/Value': 'Email', 'item/Category/Value': 'Question',
+                'item/RequesterEmail': "@{outputs('Sender')}",
+                'item/ContactRef': "@first(coalesce(body('Find_contact')?['value'], createArray()))?['ID']",
+                'item/AccountRef': "@first(coalesce(body('Find_contact')?['value'], createArray()))?['AccountRef']",
+                'item/Description': "From: @{outputs('Sender')}\n\n@{outputs('Email_text')}"
+              }, { Find_contact: ['Succeeded', 'Failed'] }),
+              Case_number: { runAfter: { Create_case: ['Succeeded'] }, type: 'Compose', inputs: `@{concat(${P('casePrefix').slice(1)}, '-', formatDateTime(utcNow(), 'yyyy'), '-', formatNumber(body('Create_case')?['ID'], '0000'))}` },
+              Set_number: api('sp', 'PatchItem', {
+                dataset: P('site'), table: LISTS.cases, id: "@body('Create_case')?['ID']", 'item/Title': "@body('Create_case')?['Title']", 'item/CaseNumber': "@{outputs('Case_number')}"
+              }, { Case_number: ['Succeeded'] }),
+              Log_email: api('sp', 'PostItem', {
+                dataset: P('site'), table: LISTS.acts, 'item/Title': "@{take(concat('Received: ', outputs('Subject')), 255)}",
+                'item/Details': "From: @{outputs('Sender')}\n\n@{outputs('Email_text')}", 'item/ActivityType/Value': 'Email',
+                'item/RelatedType': 'Case', 'item/RelatedId': "@body('Create_case')?['ID']", 'item/Completed': true, 'item/DueDate': '@utcNow()',
+                'item/ActivitySource/Value': 'Outlook'
+              }, { Set_number: ['Succeeded'] }),
+              Acknowledge: api('outlook', 'SharedMailboxSendEmailV2', {
+                'emailMessage/MailboxAddress': P('mailbox'), 'emailMessage/To': "@{outputs('Sender')}",
+                'emailMessage/Subject': "[@{outputs('Case_number')}] @{outputs('Subject')}",
+                'emailMessage/Body': `<html><head>${STYLE}</head><body><p style="font-size:18px;font-weight:600;color:#008D62">We have received your request — reference @{outputs('Case_number')}</p><p>Thank you for contacting us. Our support team will get back to you as soon as possible.</p><p>Please keep <b>[@{outputs('Case_number')}]</b> in the subject when you reply, so your message is added to the same case.</p></body></html>`,
+                'emailMessage/Importance': 'Normal'
+              }, { Set_number: ['Succeeded'] })
+            }
+          }
+        }
+      },
+      else: { actions: {} }
+    }
+  });
+
+
+// 14 — Quote e-signature (signing page served by the flow itself)
+const Q = (k) => `body('Get_quote')?['${k}']`;
+const H = (e) => `replace(replace(replace(replace(string(coalesce(${e}, '')), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '"', '&quot;')`;
+const money2 = (e) => `formatNumber(float(coalesce(${e}, 0)), 'N2', 'en-US')`;
+const PAGE_CSS = 'body{font-family:Segoe UI,Arial,sans-serif;color:#121317;margin:0;background:#f5f7f6}main{max-width:760px;margin:24px auto;background:#fff;padding:28px;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.08)}h1{font-size:22px;margin:0 0 4px;color:#008D62}.m{color:#5b616e}table{width:100%;border-collapse:collapse;margin:16px 0}th{text-align:left;background:#e6f4ee;padding:8px;font-weight:600}td{padding:8px;border-bottom:1px solid #eee}.n{text-align:right;white-space:nowrap}.tot{font-size:18px;font-weight:700;text-align:right}.terms{white-space:pre-wrap;font-size:13px;color:#333;background:#fafafa;padding:12px;border-radius:6px}label{display:block;margin:12px 0 4px;font-weight:600}input[type=text],textarea{width:100%;box-sizing:border-box;padding:9px;border:1px solid #bbb;border-radius:6px;font:inherit}.chk{display:flex;gap:8px;align-items:flex-start;margin:14px 0;font-weight:400}.btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}button{font:inherit;padding:10px 18px;border-radius:6px;border:1px solid #008D62;cursor:pointer}.ok{background:#008D62;color:#fff}.no{background:#fff;color:#a4262c;border-color:#a4262c}.err{background:#fde7e9;color:#a4262c;padding:10px;border-radius:6px}.done{background:#e6f4ee;padding:14px;border-radius:6px}@media(max-width:600px){main{margin:0;border-radius:0;padding:16px}}';
+const page = (title, inner) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${title}</title><style>${PAGE_CSS}</style></head><body><main>${inner}</main></body></html>`;
+const htmlResponse = (body, runAfter = {}) => ({
+  runAfter, type: 'Response', kind: 'Http',
+  inputs: { statusCode: 200, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer', 'X-Robots-Tag': 'noindex' }, body }
+});
+const quoteSummary = `<h1>Quote @{${H(Q('QuoteNumber'))}}</h1><p class="m">@{${H(Q('Title'))}}@{if(empty(${Q('ValidUntil')}), '', concat(' · valid until ', formatDateTime(${Q('ValidUntil')}, 'd MMM yyyy')))}</p>
+<table><thead><tr><th>Item</th><th class="n">Qty</th><th class="n">Unit price</th><th class="n">Discount</th></tr></thead><tbody>@{join(body('Rows'), '')}</tbody></table>
+<p class="tot">Total @{${money2(Q('GrandTotal'))}} @{${H(Q('Currency'))}} <span class="m" style="font-size:13px;font-weight:400">(incl. tax @{${money2(Q('TaxTotal'))}})</span></p>
+@{if(empty(coalesce(${Q('Terms')}, '')), '', concat('<p><b>Terms &amp; conditions</b></p><div class="terms">', ${H(Q('Terms'))}, '</div>'))}`;
+const signForm = (errorExpr) => page('Review and sign quote', `${quoteSummary}
+${errorExpr}
+<form method="post" action="" autocomplete="on">
+<label for="n">Your full name</label><input type="text" id="n" name="name" maxlength="120" required autocomplete="name">
+<label for="t">Job title</label><input type="text" id="t" name="title" maxlength="120" autocomplete="organization-title">
+<label for="c">Comments (optional)</label><textarea id="c" name="note" rows="2" maxlength="1000"></textarea>
+<label class="chk"><input type="checkbox" name="agree" value="yes" required> I have authority to accept this quote and agree to its terms. Typing my name above is my electronic signature.</label>
+<div class="btns"><button class="ok" type="submit" name="decision" value="accept">Accept and sign</button><button class="no" type="submit" name="decision" value="decline" formnovalidate>Decline</button></div>
+</form>`);
+const formField = (key) => ({ type: 'Query', inputs: { from: "@coalesce(triggerBody()?['$formdata'], createArray())", where: `@equals(item()?['key'], '${key}')` } });
+const fv = (key) => `trim(string(coalesce(first(body('Form_${key}'))?['value'], '')))`;
+const ipExpr = "@{take(coalesce(triggerOutputs()?['headers']?['X-Forwarded-For'], triggerOutputs()?['headers']?['x-forwarded-for'], triggerOutputs()?['headers']?['X-Real-IP'], ''), 255)}";
+const uaExpr = "coalesce(triggerOutputs()?['headers']?['User-Agent'], triggerOutputs()?['headers']?['user-agent'], '')";
+flow('Brillienta CRM - Quote e-signature',
+  'Serves the customer signing page for quotes sent with "Send for e-signature" (single-use link). Records the signer name, job title, IP address, time, comments and a snapshot of the signed quote, then marks the quote Accepted (or Rejected when declined) and emails the quote owner and the signer. The CRM completes the deal (opportunity won, subscriptions) when it is next opened. Requires Power Automate Premium (HTTP trigger).',
+  ['sp', 'outlook'], ['site', 'page', 'sales'],
+  { manual: { type: 'Request', kind: 'Http', inputs: { triggerAuthenticationType: 'All' } } },
+  {
+    Quote_id: { runAfter: {}, type: 'Compose', inputs: "@int(coalesce(triggerOutputs()?['queries']?['q'], '0'))" },
+    Token: { runAfter: {}, type: 'Compose', inputs: "@{coalesce(triggerOutputs()?['queries']?['t'], '')}" },
+    Get_quote: api('sp', 'GetItem', { dataset: P('site'), table: LISTS.quotes, id: "@outputs('Quote_id')" }, { Quote_id: ['Succeeded'] }),
+    Link_not_found: htmlResponse(page('Link not valid', '<h1>This link is not valid</h1><p class="m">Please ask your contact for a new link.</p>'), { Get_quote: ['Failed', 'Skipped', 'TimedOut'] }),
+    Is_valid: {
+      runAfter: { Get_quote: ['Succeeded'], Token: ['Succeeded'] }, type: 'Compose',
+      inputs: `@and(not(empty(outputs('Token'))), equals(outputs('Token'), coalesce(${Q('SignatureToken')}, '')), contains(createArray('Sent', 'Viewed'), coalesce(${Q('SignatureStatus')}?['Value'], '')), or(empty(${Q('ValidUntil')}), greaterOrEquals(ticks(addDays(${Q('ValidUntil')}, 1)), ticks(utcNow()))))`
+    },
+    Rows: {
+      runAfter: { Is_valid: ['Succeeded'] }, type: 'Select',
+      inputs: {
+        from: `@json(coalesce(${Q('LineItems')}, '[]'))`,
+        select: `@concat('<tr><td>', ${H("item()?['name']")}, '</td><td class=\"n\">', string(coalesce(item()?['quantity'], 0)), '</td><td class=\"n\">', formatNumber(float(coalesce(item()?['unitPrice'], 0)), 'N2', 'en-US'), '</td><td class=\"n\">', if(greater(float(coalesce(item()?['discountPct'], 0)), 0), concat(string(item()?['discountPct']), '%'), ''), '</td></tr>')`
+      }
+    },
+    Valid_link: {
+      runAfter: { Rows: ['Succeeded'] }, type: 'If',
+      expression: { and: [{ equals: ["@outputs('Is_valid')", true] }] },
+      actions: {
+        Is_form_post: {
+          runAfter: {}, type: 'If',
+          expression: { and: [{ contains: ["@toLower(string(coalesce(triggerOutputs()?['headers']?['Content-Type'], triggerOutputs()?['headers']?['content-type'], '')))", 'application/x-www-form-urlencoded'] }] },
+          actions: {
+            Form_name: { runAfter: {}, ...formField('name') },
+            Form_title: { runAfter: {}, ...formField('title') },
+            Form_note: { runAfter: {}, ...formField('note') },
+            Form_agree: { runAfter: {}, ...formField('agree') },
+            Form_decision: { runAfter: {}, ...formField('decision') },
+            Decision: {
+              runAfter: { Form_name: ['Succeeded'], Form_title: ['Succeeded'], Form_note: ['Succeeded'], Form_agree: ['Succeeded'], Form_decision: ['Succeeded'] }, type: 'Compose',
+              inputs: `@if(equals(${fv('decision')}, 'decline'), 'decline', if(and(equals(${fv('decision')}, 'accept'), equals(${fv('agree')}, 'yes'), greaterOrEquals(length(${fv('name')}), 2)), 'accept', 'incomplete'))`
+            },
+            Accepted: {
+              runAfter: { Decision: ['Succeeded'] }, type: 'If', expression: { and: [{ equals: ["@outputs('Decision')", 'accept'] }] },
+              actions: {
+                Signature_ref: { runAfter: {}, type: 'Compose', inputs: "@{toUpper(take(replace(guid(), '-', ''), 16))}" },
+                Save_signature: api('sp', 'PatchItem', {
+                  dataset: P('site'), table: LISTS.quotes, id: "@outputs('Quote_id')", 'item/Title': `@${Q('Title')}`,
+                  'item/QuoteStatus/Value': 'Accepted', 'item/SignatureStatus/Value': 'Signed',
+                  'item/SignatureName': `@{take(${fv('name')}, 255)}`, 'item/SignatureTitle': `@{take(${fv('title')}, 255)}`,
+                  'item/SignatureNote': `@{${fv('note')}}`, 'item/SignedDate': '@utcNow()', 'item/SignatureIp': ipExpr,
+                  'item/SignatureId': "@{outputs('Signature_ref')}", 'item/SignatureToken': '',
+                  'item/SignedSnapshot': `@{concat('Quote ', ${Q('QuoteNumber')}, ' | total ', string(${Q('GrandTotal')}), ' ', coalesce(${Q('Currency')}, ''), ' | valid until ', coalesce(${Q('ValidUntil')}, ''), ' | signer ', ${fv('name')}, ' <', coalesce(${Q('SignatureEmail')}, ''), '> | ip ', coalesce(triggerOutputs()?['headers']?['X-Forwarded-For'], ''), ' | user agent ', ${uaExpr}, ' | signed ', utcNow(), ' | lines ', coalesce(${Q('LineItems')}, '[]'), ' | terms ', coalesce(${Q('Terms')}, ''))}`
+                }, { Signature_ref: ['Succeeded'] }),
+                Log_signature: api('sp', 'PostItem', {
+                  dataset: P('site'), table: LISTS.acts, 'item/Title': `@{take(concat('Quote signed by ', ${fv('name')}), 255)}`,
+                  'item/Details': `@{concat(${fv('name')}, if(empty(${fv('title')}), '', concat(', ', ${fv('title')})), ' accepted quote ', ${Q('QuoteNumber')}, ' electronically. Reference ', outputs('Signature_ref'), '. ', ${fv('note')})}`,
+                  'item/ActivityType/Value': 'Note', 'item/RelatedType': 'Quote', 'item/RelatedId': "@outputs('Quote_id')", 'item/Completed': true, 'item/ActivitySource/Value': 'Flow'
+                }, { Save_signature: ['Succeeded'] }),
+                Tell_owner_signed: email(`@{coalesce(${Q('QuoteOwner')}?['Email'], ${P('sales').slice(1)})}`,
+                  `✍ Quote @{${Q('QuoteNumber')}} signed by @{${fv('name')}}`,
+                  html(`Quote @{${Q('QuoteNumber')}} was accepted and signed`, `<table>${tr('Signed by', `@{${H(fv('name'))}} @{${H(fv('title'))}}`)}${tr('Email', `@{${H(Q('SignatureEmail'))}}`)}${tr('Total', `@{${money2(Q('GrandTotal'))}} @{${H(Q('Currency'))}}`)}${tr('Comments', `@{${H(fv('note'))}}`)}${tr('Reference', "@{outputs('Signature_ref')}")}</table><p>Open the CRM to close the deal and create subscriptions automatically.</p>`),
+                  { Save_signature: ['Succeeded'] }),
+                Confirm_signer: email(`@{${Q('SignatureEmail')}}`, `Your acceptance of quote @{${Q('QuoteNumber')}}`,
+                  `<html><head>${STYLE}</head><body><p style="font-size:18px;font-weight:600;color:#008D62">Thank you — quote @{${H(Q('QuoteNumber'))}} is accepted</p><table>${tr('Quote', `@{${H(Q('Title'))}}`)}${tr('Total', `@{${money2(Q('GrandTotal'))}} @{${H(Q('Currency'))}}`)}${tr('Signed by', `@{${H(fv('name'))}}`)}${tr('Signed on (UTC)', "@{formatDateTime(utcNow(), 'd MMM yyyy HH:mm')}")}${tr('Reference', "@{outputs('Signature_ref')}")}</table><p>Keep this email for your records.</p></body></html>`,
+                  { Save_signature: ['Succeeded'] }),
+                Thank_you: htmlResponse(page('Quote accepted', `<h1>Thank you</h1><div class="done">Quote <b>@{${H(Q('QuoteNumber'))}}</b> is accepted and signed by <b>@{${H(fv('name'))}}</b>.<br>Reference @{outputs('Signature_ref')} · a confirmation email is on its way.</div>`), { Save_signature: ['Succeeded'] })
+              },
+              else: {
+                actions: {
+                  Declined: {
+                    runAfter: {}, type: 'If', expression: { and: [{ equals: ["@outputs('Decision')", 'decline'] }] },
+                    actions: {
+                      Save_decline: api('sp', 'PatchItem', {
+                        dataset: P('site'), table: LISTS.quotes, id: "@outputs('Quote_id')", 'item/Title': `@${Q('Title')}`,
+                        'item/QuoteStatus/Value': 'Rejected', 'item/SignatureStatus/Value': 'Declined', 'item/SignatureToken': '',
+                        'item/SignatureName': `@{take(${fv('name')}, 255)}`, 'item/SignatureNote': `@{${fv('note')}}`, 'item/SignedDate': '@utcNow()', 'item/SignatureIp': ipExpr
+                      }),
+                      Tell_owner_declined: email(`@{coalesce(${Q('QuoteOwner')}?['Email'], ${P('sales').slice(1)})}`, `Quote @{${Q('QuoteNumber')}} was declined`,
+                        html(`Quote @{${Q('QuoteNumber')}} was declined`, `<table>${tr('By', `@{${H(fv('name'))}} @{${H(Q('SignatureEmail'))}}`)}${tr('Comments', `@{${H(fv('note'))}}`)}</table>`), { Save_decline: ['Succeeded'] }),
+                      Declined_page: htmlResponse(page('Quote declined', '<h1>Thank you for letting us know</h1><div class="done">We have told your contact that you declined this quote.</div>'), { Save_decline: ['Succeeded'] })
+                    },
+                    else: { actions: { Incomplete_page: htmlResponse(signForm('<p class="err">Please enter your full name and tick the box to accept.</p>')) } }
+                  }
+                }
+              }
+            }
+          },
+          else: {
+            actions: {
+              First_view: {
+                runAfter: {}, type: 'If', expression: { and: [{ equals: [`@coalesce(${Q('SignatureStatus')}?['Value'], '')`, 'Sent'] }] },
+                actions: {
+                  Mark_viewed: api('sp', 'PatchItem', { dataset: P('site'), table: LISTS.quotes, id: "@outputs('Quote_id')", 'item/Title': `@${Q('Title')}`, 'item/SignatureStatus/Value': 'Viewed' })
+                },
+                else: { actions: {} }
+              },
+              Signing_page: htmlResponse(signForm(''), { First_view: ['Succeeded', 'Failed'] })
+            }
+          }
+        }
+      },
+      else: {
+        actions: {
+          Link_used: htmlResponse(page('Link not valid', `<h1>@{if(equals(coalesce(${Q('SignatureStatus')}?['Value'], ''), 'Signed'), 'This quote is already signed', 'This link is no longer valid')}</h1><p class="m">@{if(equals(coalesce(${Q('SignatureStatus')}?['Value'], ''), 'Signed'), concat('Signed by ', ${H(Q('SignatureName'))}, ' on ', formatDateTime(${Q('SignedDate')}, 'd MMM yyyy'), '.'), 'The quote may have expired, been answered or been sent again with a new link. Please ask your contact for a new link.')}</p>`))
+        }
+      }
+    }
+  });
+
+
+// ------------------------------------------------------------------ WhatsApp Business Cloud API
+const A = (k) => `triggerOutputs()?['body/${k}']`;
+const GRAPH = `https://graph.facebook.com/v21.0/${Pi('waPhoneId')}/messages`;
+const waHeaders = { Authorization: `Bearer ${Pi('waToken')}`, 'Content-Type': 'application/json' };
+const actPatch = (fields, runAfter = {}) => api('sp', 'PatchItem', { dataset: P('site'), table: LISTS.acts, id: `@${A('ID')}`, 'item/Title': `@${A('Title')}`, ...fields }, runAfter);
+
+// 15 — WhatsApp send
+flow('Brillienta CRM - WhatsApp send',
+  'Sends WhatsApp messages queued in the CRM (WhatsApp › Send) through the WhatsApp Business Cloud API: approved templates with their values, or free text inside the 24-hour customer service window. Writes Sent/Failed back to the activity. Requires Power Automate Premium (HTTP).',
+  ['sp'], ['site', 'waPhoneId', 'waToken'],
+  { When_a_message_is_queued: spPoll('GetOnUpdatedItems', 'acts', [`@equals(${A('WaStatus/Value')}, 'Queued')`]) },
+  {
+    Template_values: {
+      runAfter: {}, type: 'Select',
+      inputs: { from: `@json(coalesce(${A('WaParams')}, '[]'))`, select: { type: 'text', text: "@{take(string(item()), 1000)}" } }
+    },
+    Uses_template: {
+      runAfter: { Template_values: ['Succeeded'] }, type: 'If', expression: { and: [{ not: { equals: [`@coalesce(${A('WaTemplate')}, '')`, ''] } }] },
+      actions: {
+        Send_template: http('POST', GRAPH, waHeaders, {
+          messaging_product: 'whatsapp', to: `@{${A('WaTo')}}`, type: 'template',
+          template: {
+            name: `@{first(split(${A('WaTemplate')}, '|'))}`, language: { code: `@{last(split(${A('WaTemplate')}, '|'))}` },
+            components: [{ type: 'body', parameters: "@body('Template_values')" }]
+          }
+        })
+      },
+      else: {
+        actions: {
+          Send_text: http('POST', GRAPH, waHeaders, {
+            messaging_product: 'whatsapp', to: `@{${A('WaTo')}}`, type: 'text', text: { preview_url: true, body: `@{take(coalesce(${A('Details')}, ''), 4096)}` }
+          })
+        }
+      }
+    },
+    Message_id: { runAfter: { Uses_template: ['Succeeded'] }, type: 'Compose', inputs: "@{coalesce(body('Send_template')?['messages']?[0]?['id'], body('Send_text')?['messages']?[0]?['id'], '')}" },
+    Mark_sent: actPatch({ 'item/WaStatus/Value': 'Sent', 'item/Completed': true, 'item/ExternalId': "@{concat('wa:', outputs('Message_id'))}" }, { Message_id: ['Succeeded'] }),
+    Mark_failed: actPatch({
+      'item/WaStatus/Value': 'Failed',
+      'item/Details': `@{concat(coalesce(${A('Details')}, ''), '\n\n— Not sent: ', coalesce(body('Send_template')?['error']?['message'], body('Send_text')?['error']?['message'], 'see the flow run history'))}`
+    }, { Uses_template: ['Failed', 'TimedOut'] })
+  });
+
+// 16 — WhatsApp inbound
+const V = "triggerBody()?['entry']?[0]?['changes']?[0]?['value']";
+flow('Brillienta CRM - WhatsApp inbound',
+  'Webhook for the WhatsApp Business Cloud API (Meta › WhatsApp › Configuration). Answers the verification request, logs incoming messages on the matching contact or lead (unknown numbers become new WhatsApp leads) and updates delivery status (sent, delivered, read, failed) of messages sent from the CRM. Requires Power Automate Premium (HTTP trigger).',
+  ['sp'], ['site', 'waPhoneId', 'waVerify'],
+  { manual: { type: 'Request', kind: 'Http', inputs: { triggerAuthenticationType: 'All' } } },
+  {
+    Is_verification: {
+      runAfter: {}, type: 'If', expression: { and: [{ equals: ["@coalesce(triggerOutputs()?['queries']?['hub.mode'], '')", 'subscribe'] }] },
+      actions: {
+        Token_ok: {
+          runAfter: {}, type: 'If', expression: { and: [{ equals: ["@coalesce(triggerOutputs()?['queries']?['hub.verify_token'], '')", P('waVerify')] }, { not: { equals: [P('waVerify'), 'not-set'] } }] },
+          actions: { Challenge: { runAfter: {}, type: 'Response', kind: 'Http', inputs: { statusCode: 200, headers: { 'Content-Type': 'text/plain' }, body: "@{triggerOutputs()?['queries']?['hub.challenge']}" } } },
+          else: { actions: { Forbidden: respond(403, {}) } }
+        }
+      },
+      else: {
+        actions: {
+          Our_number: {
+            runAfter: {}, type: 'If', expression: { and: [{ equals: [`@coalesce(${V}?['metadata']?['phone_number_id'], '')`, P('waPhoneId')] }] },
+            actions: {
+              For_each_message: {
+                runAfter: {}, type: 'Foreach', foreach: `@coalesce(${V}?['messages'], createArray())`,
+                actions: {
+                  Sender: { runAfter: {}, type: 'Compose', inputs: "@{replace(coalesce(items('For_each_message')?['from'], ''), '''', '')}" },
+                  Text: { runAfter: {}, type: 'Compose', inputs: "@{coalesce(items('For_each_message')?['text']?['body'], items('For_each_message')?['button']?['text'], items('For_each_message')?['interactive']?['button_reply']?['title'], items('For_each_message')?['interactive']?['list_reply']?['title'], items('For_each_message')?['image']?['caption'], items('For_each_message')?['document']?['filename'], concat('[', items('For_each_message')?['type'], ' message]'))}" },
+                  Profile_name: { runAfter: {}, type: 'Compose', inputs: `@{coalesce(first(coalesce(${V}?['contacts'], createArray()))?['profile']?['name'], '')}` },
+                  Find_contact: getItems('contacts', "Whatsapp eq '@{outputs('Sender')}'", { Sender: ['Succeeded'] }, 1),
+                  Find_lead: getItems('leads', "Whatsapp eq '@{outputs('Sender')}'", { Sender: ['Succeeded'] }, 1),
+                  Target: {
+                    runAfter: { Find_contact: ['Succeeded'], Find_lead: ['Succeeded'], Text: ['Succeeded'], Profile_name: ['Succeeded'] }, type: 'Compose',
+                    inputs: "@if(greater(length(body('Find_contact')?['value']), 0), concat('Contact|', string(first(body('Find_contact')?['value'])?['ID'])), if(greater(length(body('Find_lead')?['value']), 0), concat('Lead|', string(first(body('Find_lead')?['value'])?['ID'])), 'new'))"
+                  },
+                  Known_sender: {
+                    runAfter: { Target: ['Succeeded'] }, type: 'If', expression: { and: [{ not: { equals: ["@outputs('Target')", 'new'] } }] },
+                    actions: {
+                      Log_message: api('sp', 'PostItem', {
+                        dataset: P('site'), table: LISTS.acts, 'item/Title': "@{take(concat('WhatsApp from +', outputs('Sender'), ': ', outputs('Text')), 255)}",
+                        'item/Details': "@{outputs('Text')}", 'item/ActivityType/Value': 'WhatsApp', 'item/RelatedType': "@{first(split(outputs('Target'), '|'))}",
+                        'item/RelatedId': "@int(last(split(outputs('Target'), '|')))", 'item/Completed': true, 'item/DueDate': '@utcNow()',
+                        'item/ActivitySource/Value': 'WhatsApp', 'item/WaStatus/Value': 'Received', 'item/WaTo': "@{outputs('Sender')}",
+                        'item/ExternalId': "@{concat('wa:', items('For_each_message')?['id'])}"
+                      })
+                    },
+                    else: {
+                      actions: {
+                        Create_lead: api('sp', 'PostItem', {
+                          dataset: P('site'), table: LISTS.leads,
+                          'item/Title': "@{if(empty(outputs('Profile_name')), concat('WhatsApp +', outputs('Sender')), outputs('Profile_name'))}",
+                          'item/FirstName': "@{first(split(if(empty(outputs('Profile_name')), 'WhatsApp', outputs('Profile_name')), ' '))}",
+                          'item/LastName': "@{if(contains(outputs('Profile_name'), ' '), trim(substring(outputs('Profile_name'), indexOf(outputs('Profile_name'), ' '))), '')}",
+                          'item/Phone': "@{concat('+', outputs('Sender'))}", 'item/Whatsapp': "@{outputs('Sender')}",
+                          'item/LeadSource/Value': 'WhatsApp', 'item/Status/Value': 'New', 'item/Rating/Value': 'Warm',
+                          'item/Description': "@{concat('First WhatsApp message: ', outputs('Text'))}"
+                        }),
+                        Log_first_message: api('sp', 'PostItem', {
+                          dataset: P('site'), table: LISTS.acts, 'item/Title': "@{take(concat('WhatsApp from +', outputs('Sender'), ': ', outputs('Text')), 255)}",
+                          'item/Details': "@{outputs('Text')}", 'item/ActivityType/Value': 'WhatsApp', 'item/RelatedType': 'Lead',
+                          'item/RelatedId': "@body('Create_lead')?['ID']", 'item/Completed': true, 'item/DueDate': '@utcNow()',
+                          'item/ActivitySource/Value': 'WhatsApp', 'item/WaStatus/Value': 'Received', 'item/WaTo': "@{outputs('Sender')}",
+                          'item/ExternalId': "@{concat('wa:', items('For_each_message')?['id'])}"
+                        }, { Create_lead: ['Succeeded'] })
+                      }
+                    }
+                  }
+                }
+              },
+              For_each_status: {
+                runAfter: { For_each_message: ['Succeeded', 'Failed'] }, type: 'Foreach', foreach: `@coalesce(${V}?['statuses'], createArray())`,
+                actions: {
+                  Find_sent: getItems('acts', "ExternalId eq 'wa:@{replace(items('For_each_status')?['id'], '''', '')}'", {}, 1),
+                  For_the_activity: {
+                    runAfter: { Find_sent: ['Succeeded'] }, type: 'Foreach', foreach: "@body('Find_sent')?['value']",
+                    actions: {
+                      Update_status: api('sp', 'PatchItem', {
+                        dataset: P('site'), table: LISTS.acts, id: "@items('For_the_activity')?['ID']", 'item/Title': "@items('For_the_activity')?['Title']",
+                        'item/WaStatus/Value': "@{if(equals(items('For_each_status')?['status'], 'read'), 'Read', if(equals(items('For_each_status')?['status'], 'delivered'), 'Delivered', if(equals(items('For_each_status')?['status'], 'failed'), 'Failed', 'Sent')))}"
+                      })
+                    }
+                  }
+                }
+              }
+            },
+            else: { actions: {} }
+          },
+          Accepted: respond(200, { Our_number: ['Succeeded', 'Failed', 'Skipped', 'TimedOut'] })
+        }
+      }
+    }
   });
 
 // ------------------------------------------------------------------ validation

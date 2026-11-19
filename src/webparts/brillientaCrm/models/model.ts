@@ -39,7 +39,7 @@ export interface IFieldDef {
 
 export type EntityKey =
   | 'leads' | 'accounts' | 'contacts' | 'opportunities' | 'quotes' | 'products'
-  | 'demos' | 'cases' | 'campaigns' | 'activities';
+  | 'demos' | 'cases' | 'campaigns' | 'activities' | 'subscriptions' | 'invoices';
 
 export type SystemListKey = 'settings' | 'audit';
 export type ListKey = EntityKey | SystemListKey;
@@ -100,7 +100,10 @@ export const QUOTE_STATUSES = ['Draft', 'Sent', 'Accepted', 'Rejected', 'Expired
 export const CASE_STATUSES = ['New', 'In progress', 'Waiting on customer', 'Resolved', 'Closed'];
 export const CASE_PRIORITIES = ['Low', 'Normal', 'High', 'Critical'];
 export const FORECAST_CATEGORIES = ['Pipeline', 'Best case', 'Commit', 'Omitted', 'Closed'];
-export const ACTIVITY_TYPES = ['Call', 'Email', 'Meeting', 'Note', 'Task'];
+export const SUBSCRIPTION_STATUSES = ['Trial', 'Active', 'Pending renewal', 'Cancelled', 'Expired'];
+export const INVOICE_STATUSES = ['Draft', 'Sent', 'Paid', 'Overdue', 'Void'];
+export const DEAL_TYPES = ['New business', 'Renewal', 'Upsell'];
+export const ACTIVITY_TYPES = ['Call', 'Email', 'Meeting', 'WhatsApp', 'Note', 'Task'];
 export const WON = 'Closed Won';
 export const LOST = 'Closed Lost';
 
@@ -117,6 +120,7 @@ export const ENTITIES: IEntityDef[] = [
       f('lastName', 'Last name', 'text', { section: 'General' }),
       f('email', 'Email', 'email', { section: 'General' }),
       f('phone', 'Phone', 'phone', { section: 'General' }),
+      f('whatsapp', 'WhatsApp ID', 'text', { hidden: true }),
       f('company', 'Company', 'text', { section: 'General', grid: true }),
       f('jobTitle', 'Job title', 'text', { section: 'General' }),
       f('country', 'Country', 'text', { section: 'General', filter: true }),
@@ -147,6 +151,8 @@ export const ENTITIES: IEntityDef[] = [
       { entity: 'contacts', field: 'accountRef', label: 'Contacts' },
       { entity: 'opportunities', field: 'accountRef', label: 'Opportunities' },
       { entity: 'quotes', field: 'accountRef', label: 'Quotes' },
+      { entity: 'subscriptions', field: 'accountRef', label: 'Subscriptions' },
+      { entity: 'invoices', field: 'accountRef', label: 'Invoices' },
       { entity: 'cases', field: 'accountRef', label: 'Cases' },
       { entity: 'accounts', field: 'parentAccountRef', label: 'Subsidiaries' }
     ],
@@ -186,6 +192,7 @@ export const ENTITIES: IEntityDef[] = [
       f('email', 'Email', 'email', { section: 'General', grid: true }),
       f('phone', 'Phone', 'phone', { section: 'General', grid: true }),
       f('mobile', 'Mobile', 'phone', { section: 'General' }),
+      f('whatsapp', 'WhatsApp ID', 'text', { hidden: true }),
       f('jobTitle', 'Job title', 'text', { section: 'General', grid: true }),
       ref('accountRef', 'Account', 'accounts', { section: 'General', grid: true, filter: true }),
       owner('ContactOwner'),
@@ -202,7 +209,7 @@ export const ENTITIES: IEntityDef[] = [
     key: 'opportunities', listTitle: 'CRM Opportunities', singular: 'Opportunity', plural: 'Opportunities', icon: 'Money', area: 'Sales', plan: 'standard',
     description: 'Deals in your sales pipeline', activityName: 'Opportunity', boardField: 'stage',
     searchFields: ['title', 'company', 'contactName', 'email', 'nextStep'],
-    related: [{ entity: 'quotes', field: 'opportunityRef', label: 'Quotes' }],
+    related: [{ entity: 'quotes', field: 'opportunityRef', label: 'Quotes' }, { entity: 'subscriptions', field: 'opportunityRef', label: 'Subscriptions' }],
     fields: [
       title('Deal name'),
       ref('accountRef', 'Account', 'accounts', { section: 'General', grid: true }),
@@ -211,6 +218,7 @@ export const ENTITIES: IEntityDef[] = [
       f('amount', 'Amount', 'currency', { section: 'General', grid: true }),
       f('probability', 'Probability', 'percent', { section: 'General', grid: true }),
       f('forecastCategory', 'Forecast category', 'choice', { choices: FORECAST_CATEGORIES, section: 'General', filter: true }),
+      f('dealType', 'Deal type', 'choice', { choices: DEAL_TYPES, defaultValue: 'New business', section: 'General', filter: true }),
       f('expectedCloseDate', 'Expected close', 'date', { section: 'General', grid: true }),
       f('actualCloseDate', 'Actual close', 'date', { section: 'General' }),
       { ...owner('DealOwner') },
@@ -225,6 +233,7 @@ export const ENTITIES: IEntityDef[] = [
       ref('leadRef', 'Source lead', 'leads'),
       ref('demoRef', 'Demo', 'demos'),
       ref('campaignRef', 'Campaign', 'campaigns'),
+      ref('subscriptionRef', 'Subscription (renewal)', 'subscriptions'),
       { ...tags, section: 'Details' },
       f('notes', 'Notes', 'note', { section: 'Details' })
     ]
@@ -233,6 +242,7 @@ export const ENTITIES: IEntityDef[] = [
     key: 'quotes', listTitle: 'CRM Quotes', singular: 'Quote', plural: 'Quotes', icon: 'Document', area: 'Sales', plan: 'standard',
     description: 'Priced proposals with line items, printable as PDF', activityName: 'Quote', boardField: 'quoteStatus',
     searchFields: ['title', 'quoteNumber'],
+    related: [{ entity: 'invoices', field: 'quoteRef', label: 'Invoices' }, { entity: 'subscriptions', field: 'quoteRef', label: 'Subscriptions' }],
     fields: [
       f('quoteNumber', 'Quote #', 'text', { readOnly: true, section: 'General', grid: true }),
       title('Quote name'),
@@ -243,6 +253,18 @@ export const ENTITIES: IEntityDef[] = [
       f('validUntil', 'Valid until', 'date', { section: 'General', grid: true }),
       f('approvalStatus', 'Approval', 'choice', { choices: ['Pending', 'Approved', 'Rejected'], section: 'General', grid: true, filter: true, readOnly: true }),
       f('approvalNote', 'Approver comments', 'note', { section: 'General', readOnly: true }),
+      f('signatureStatus', 'E-signature', 'choice', { choices: ['Sent', 'Viewed', 'Signed', 'Declined'], section: 'Signature', readOnly: true, filter: true }),
+      f('signatureEmail', 'Sent for signature to', 'email', { section: 'Signature', readOnly: true }),
+      f('signatureName', 'Signed by', 'text', { section: 'Signature', readOnly: true }),
+      f('signatureTitle', 'Signer job title', 'text', { section: 'Signature', readOnly: true }),
+      f('signedDate', 'Signed on', 'datetime', { section: 'Signature', readOnly: true }),
+      f('signatureIp', 'Signer IP address', 'text', { section: 'Signature', readOnly: true }),
+      f('signatureId', 'Signature reference', 'text', { section: 'Signature', readOnly: true }),
+      f('signatureNote', 'Signer comments', 'note', { section: 'Signature', readOnly: true }),
+      f('signatureToken', 'Signing token', 'text', { hidden: true }),
+      f('signedSnapshot', 'Signed content', 'note', { hidden: true }),
+      f('signatureProcessed', 'Signature processed', 'boolean', { hidden: true }),
+      f('currency', 'Currency', 'text', { hidden: true }),
       owner('QuoteOwner'),
       f('lineItems', 'Line items', 'json', { hidden: true }),
       f('subtotal', 'Subtotal', 'currency', { readOnly: true, hidden: true }),
@@ -305,6 +327,10 @@ export const ENTITIES: IEntityDef[] = [
       f('origin', 'Origin', 'choice', { choices: ['Email', 'Phone', 'Web', 'Teams', 'Marketplace', 'Other'], section: 'General', filter: true }),
       owner('CaseOwner'),
       f('slaDue', 'SLA due', 'datetime', { readOnly: true, section: 'General', grid: true }),
+      f('firstResponseDue', 'First response due', 'datetime', { readOnly: true, section: 'SLA' }),
+      f('firstRespondedAt', 'First responded', 'datetime', { readOnly: true, section: 'SLA' }),
+      f('slaPausedAt', 'SLA paused since', 'datetime', { readOnly: true, section: 'SLA' }),
+      f('requesterEmail', 'Requester email', 'email', { section: 'General' }),
       f('resolvedDate', 'Resolved on', 'datetime', { readOnly: true, section: 'Resolution' }),
       f('description', 'Description', 'note', { section: 'Details' }),
       f('resolution', 'Resolution', 'note', { section: 'Resolution' })
@@ -332,6 +358,68 @@ export const ENTITIES: IEntityDef[] = [
     ]
   },
   {
+    key: 'subscriptions', listTitle: 'CRM Subscriptions', singular: 'Subscription', plural: 'Subscriptions', icon: 'RecurringEvent', area: 'Sales', plan: 'standard',
+    description: 'Licences and recurring revenue with renewal dates', activityName: 'Subscription', boardField: 'subStatus',
+    searchFields: ['title', 'licenseKey', 'notes'],
+    related: [
+      { entity: 'invoices', field: 'subscriptionRef', label: 'Invoices' },
+      { entity: 'opportunities', field: 'subscriptionRef', label: 'Renewals' }
+    ],
+    fields: [
+      title('Subscription'),
+      ref('accountRef', 'Account', 'accounts', { section: 'General', grid: true, filter: true, required: true }),
+      ref('productRef', 'Product', 'products', { section: 'General', grid: true }),
+      f('subStatus', 'Status', 'choice', { choices: SUBSCRIPTION_STATUSES, defaultValue: 'Active', section: 'General', grid: true, filter: true }),
+      f('billingCycle', 'Billing', 'choice', { choices: ['Monthly', 'Annual'], defaultValue: 'Annual', section: 'General', filter: true }),
+      f('quantity', 'Seats / quantity', 'number', { section: 'General', defaultValue: 1 }),
+      f('unitPrice', 'Price per seat per period', 'currency', { section: 'General' }),
+      f('mrr', 'MRR', 'currency', { section: 'General', readOnly: true, grid: true }),
+      f('arr', 'ARR', 'currency', { section: 'General', readOnly: true }),
+      f('startDate', 'Start', 'date', { section: 'Term' }),
+      f('renewalDate', 'Renewal date', 'date', { section: 'Term', grid: true }),
+      f('endDate', 'Ended on', 'date', { section: 'Term' }),
+      f('autoRenew', 'Auto-renew', 'boolean', { defaultValue: true, section: 'Term', filter: true }),
+      owner('SubscriptionOwner'),
+      f('licenseKey', 'Licence key', 'note', { section: 'Licence' }),
+      ref('contactRef', 'Billing contact', 'contacts'),
+      ref('opportunityRef', 'Opportunity', 'opportunities'),
+      ref('quoteRef', 'Quote', 'quotes'),
+      f('notes', 'Notes', 'note', { section: 'Details' })
+    ]
+  },
+  {
+    key: 'invoices', listTitle: 'CRM Invoices', singular: 'Invoice', plural: 'Invoices', icon: 'Money', area: 'Sales', plan: 'standard',
+    description: 'Invoices with payment links and accounting export', activityName: 'Invoice', boardField: 'invoiceStatus',
+    searchFields: ['title', 'invoiceNumber', 'externalRef'],
+    fields: [
+      f('invoiceNumber', 'Invoice #', 'text', { readOnly: true, section: 'General', grid: true }),
+      title('Invoice title'),
+      ref('accountRef', 'Account', 'accounts', { section: 'General', grid: true, filter: true, required: true }),
+      ref('contactRef', 'Billing contact', 'contacts', { section: 'General' }),
+      f('invoiceStatus', 'Status', 'choice', { choices: INVOICE_STATUSES, defaultValue: 'Draft', section: 'General', grid: true, filter: true }),
+      f('issueDate', 'Issue date', 'date', { section: 'General', grid: true }),
+      f('dueDate', 'Due date', 'date', { section: 'General', grid: true }),
+      owner('InvoiceOwner'),
+      f('lineItems', 'Line items', 'json', { hidden: true }),
+      f('subtotal', 'Subtotal', 'currency', { readOnly: true, hidden: true }),
+      f('discountTotal', 'Discount', 'currency', { readOnly: true, hidden: true }),
+      f('taxTotal', 'Tax', 'currency', { readOnly: true, hidden: true }),
+      f('grandTotal', 'Total', 'currency', { readOnly: true, hidden: true, grid: true }),
+      f('currency', 'Currency', 'text', { hidden: true }),
+      f('amountPaid', 'Amount paid', 'currency', { section: 'Payment' }),
+      f('paidDate', 'Paid on', 'date', { section: 'Payment' }),
+      f('paymentLink', 'Payment link', 'url', { section: 'Payment' }),
+      f('paymentProvider', 'Payment via', 'choice', { choices: ['Razorpay', 'Stripe', 'Bank transfer', 'Other'], section: 'Payment', filter: true }),
+      f('paymentLinkStatus', 'Payment link status', 'choice', { choices: ['Requested', 'Created', 'Failed'], section: 'Payment', readOnly: true }),
+      f('externalPaymentId', 'Payment reference', 'text', { section: 'Payment', readOnly: true }),
+      f('externalRef', 'Accounting reference', 'text', { section: 'Payment' }),
+      ref('quoteRef', 'Quote', 'quotes'),
+      ref('subscriptionRef', 'Subscription', 'subscriptions'),
+      ref('opportunityRef', 'Opportunity', 'opportunities'),
+      f('terms', 'Notes & payment terms', 'note', { section: 'Terms' })
+    ]
+  },
+  {
     key: 'activities', listTitle: 'CRM Activities', singular: 'Activity', plural: 'Activities', icon: 'TaskManager', area: 'Work', plan: 'standard',
     description: 'Calls, emails, meetings, notes and tasks', activityName: 'Activity',
     searchFields: ['title', 'details'],
@@ -343,7 +431,14 @@ export const ENTITIES: IEntityDef[] = [
       f('dueDate', 'Due', 'datetime', { section: 'General', grid: true }),
       f('completed', 'Completed', 'boolean', { section: 'General', grid: true, filter: true }),
       { key: 'owner', column: 'TaskOwner', label: 'Assigned to', type: 'user', section: 'General', grid: true, filter: true },
-      f('details', 'Details', 'note', { section: 'General' })
+      f('details', 'Details', 'note', { section: 'General' }),
+      f('waStatus', 'WhatsApp status', 'choice', { choices: ['Queued', 'Sent', 'Delivered', 'Read', 'Received', 'Failed'], section: 'General', readOnly: true }),
+      f('waTo', 'WhatsApp number', 'text', { hidden: true }),
+      f('waTemplate', 'WhatsApp template', 'text', { hidden: true }),
+      f('waParams', 'WhatsApp template values', 'json', { hidden: true }),
+      f('externalId', 'External ID', 'text', { hidden: true }),
+      f('activitySource', 'Source', 'choice', { choices: ['CRM', 'Outlook', 'Teams', 'WhatsApp', 'Website', 'Flow'], hidden: true }),
+      f('webLink', 'Open in Outlook', 'url', { section: 'General', readOnly: true })
     ]
   }
 ];

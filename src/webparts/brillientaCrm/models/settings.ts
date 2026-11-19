@@ -1,3 +1,4 @@
+import { IBusinessHours, localTimeZone } from '../services/BusinessHours';
 import { EntityKey, FieldType, IUserRef } from './model';
 
 export interface IStageDef {
@@ -12,6 +13,18 @@ export interface IWebhook {
   url: string;
   events: string[];
   active: boolean;
+}
+
+export interface IWhatsAppTemplate {
+  id: string;
+  name: string;
+  /** Message text with {{placeholders}} (same as email templates). */
+  body: string;
+  /** Name of the approved template in WhatsApp Manager (Cloud API); its {{1}}, {{2}}… take the values in `params`. */
+  cloudName?: string;
+  language?: string;
+  /** Placeholders that fill the approved template's {{1}}, {{2}}…, e.g. ["firstName", "quoteNumber"]. */
+  params?: string[];
 }
 
 export interface IEmailTemplate {
@@ -65,19 +78,41 @@ export interface ICrmSettings {
     lastIndex: number;
   };
   slaHours: Record<string, number>;
+  firstResponseHours: Record<string, number>;
+  businessHours: IBusinessHours;
+  /** SLA clock stops while a case is "Waiting on customer". */
+  slaPauseWhenWaiting: boolean;
   restrictRepsToOwnRecords: boolean;
   auditEnabled: boolean;
   integrations: {
     graphEmail: boolean;
     graphMeetings: boolean;
     teamsWebhookUrl: string;
+    /** Users may switch on automatic logging of Outlook email & meetings with CRM contacts/leads. */
+    outlookSync: boolean;
+    /** Days of mail/calendar to read the first time a user switches sync on. */
+    syncLookbackDays: number;
+    /** Never log mail with these domains (your own domain is always excluded). */
+    internalDomains: string[];
   };
   webhooks: IWebhook[];
   emailTemplates: IEmailTemplate[];
+  whatsapp: {
+    enabled: boolean;
+    /** "click": opens WhatsApp with the message ready (free, any number). "cloud": sends through the WhatsApp Business Cloud API flow. */
+    mode: 'click' | 'cloud';
+    /** Country calling code added to local numbers, e.g. "91". */
+    defaultCountryCode: string;
+    templates: IWhatsAppTemplate[];
+  };
   customFields: ICustomField[];
   quotas: IQuota[];
-  quote: { prefix: string; validityDays: number; terms: string; footer: string; approvalDiscountPct: number };
+  quote: { prefix: string; validityDays: number; terms: string; footer: string; approvalDiscountPct: number; signingUrl: string; signatureClosesOpportunity: boolean };
   casePrefix: string;
+  invoice: { prefix: string; paymentTermsDays: number; bankDetails: string; footer: string; createSubscriptionsOnAccept: boolean };
+  renewals: { leadDays: number; autoCreateOpportunities: boolean };
+  payments: { provider: 'none' | 'Razorpay' | 'Stripe' };
+  accounting: { tallySalesLedger: string; tallyTaxLedger: string; xeroSalesAccount: string; xeroTaxType: string };
   groups: { admins: string; managers: string; sales: string; support: string; readers: string };
 }
 
@@ -85,7 +120,9 @@ export const WEBHOOK_EVENTS = [
   'lead.created', 'lead.converted', 'lead.assigned',
   'opportunity.created', 'opportunity.stageChanged', 'opportunity.won', 'opportunity.lost',
   'demo.requested', 'demo.scheduled', 'demo.completed',
-  'quote.sent', 'quote.accepted', 'quote.approvalRequested',
+  'quote.sent', 'quote.accepted', 'quote.approvalRequested', 'quote.signed', 'quote.declined',
+  'subscription.created', 'subscription.renewed', 'subscription.cancelled',
+  'invoice.created', 'invoice.sent', 'invoice.paid', 'invoice.overdue',
   'case.created', 'case.resolved', 'case.slaBreached',
   'account.created', 'contact.created'
 ];
@@ -106,7 +143,7 @@ export function defaultSettings(): ICrmSettings {
       { name: 'Closed Won', probability: 100, forecast: 'Closed' },
       { name: 'Closed Lost', probability: 0, forecast: 'Omitted' }
     ],
-    leadSources: ['AppSource', 'Azure Marketplace', 'Website', 'Website Demo Form', 'Referral', 'Event', 'Webinar', 'Email Campaign', 'Partner', 'Cold outreach', 'Other'],
+    leadSources: ['AppSource', 'Azure Marketplace', 'Website', 'Website Demo Form', 'WhatsApp', 'Referral', 'Event', 'Webinar', 'Email Campaign', 'Partner', 'Cold outreach', 'Other'],
     industries: ['Technology', 'Financial services', 'Healthcare', 'Manufacturing', 'Retail', 'Education', 'Government', 'Professional services', 'Non-profit', 'Other'],
     caseCategories: ['Question', 'Problem', 'Feature request', 'Billing', 'Onboarding', 'Other'],
     lostReasons: ['Price', 'Features', 'Competitor', 'Timing', 'No budget', 'No decision', 'Other'],
@@ -125,10 +162,22 @@ export function defaultSettings(): ICrmSettings {
     },
     assignment: { autoAssignNewLeads: false, roundRobin: [], lastIndex: -1 },
     slaHours: { Critical: 4, High: 8, Normal: 24, Low: 72 },
+    firstResponseHours: { Critical: 1, High: 2, Normal: 8, Low: 24 },
+    businessHours: { enabled: false, timeZone: localTimeZone(), days: [1, 2, 3, 4, 5], start: '09:00', end: '18:00', holidays: [] },
+    slaPauseWhenWaiting: true,
     restrictRepsToOwnRecords: false,
     auditEnabled: true,
-    integrations: { graphEmail: true, graphMeetings: true, teamsWebhookUrl: '' },
+    integrations: { graphEmail: true, graphMeetings: true, teamsWebhookUrl: '', outlookSync: true, syncLookbackDays: 30, internalDomains: [] },
     webhooks: [],
+    whatsapp: {
+      enabled: true, mode: 'click', defaultCountryCode: '91',
+      templates: [
+        { id: 'hello', name: 'Introduction', body: 'Hi {{firstName}}, this is {{senderName}} from {{companyName}}. Thanks for your interest in {{product}}. Is now a good time for a quick chat?', cloudName: 'crm_intro', language: 'en', params: ['firstName', 'senderName', 'companyName'] },
+        { id: 'demo', name: 'Demo reminder', body: 'Hi {{firstName}}, a reminder of our demo on {{scheduledDate}}. Join here: {{meetingLink}}', cloudName: 'crm_demo_reminder', language: 'en', params: ['firstName', 'scheduledDate', 'meetingLink'] },
+        { id: 'quote', name: 'Quote follow-up', body: 'Hi {{firstName}}, did you have a chance to look at quote {{quoteNumber}}? Happy to answer any questions.', cloudName: 'crm_quote_followup', language: 'en', params: ['firstName', 'quoteNumber'] },
+        { id: 'pay', name: 'Payment reminder', body: 'Hi {{firstName}}, a friendly reminder that invoice {{invoiceNumber}} ({{total}}) is due. Pay online: {{paymentLink}}', cloudName: 'crm_payment_reminder', language: 'en', params: ['firstName', 'invoiceNumber', 'total', 'paymentLink'] }
+      ]
+    },
     emailTemplates: [
       {
         id: 'intro', name: 'Introduction',
@@ -152,9 +201,13 @@ export function defaultSettings(): ICrmSettings {
       prefix: 'Q', validityDays: 30,
       terms: 'Prices exclude applicable taxes unless stated. Payment due within 30 days of invoice. This quote is valid until the date shown.',
       footer: 'Thank you for your business.',
-      approvalDiscountPct: 15
+      approvalDiscountPct: 15, signingUrl: '', signatureClosesOpportunity: true
     },
     casePrefix: 'CS',
+    invoice: { prefix: 'INV', paymentTermsDays: 30, bankDetails: '', footer: 'Thank you for your business.', createSubscriptionsOnAccept: true },
+    renewals: { leadDays: 60, autoCreateOpportunities: true },
+    payments: { provider: 'none' },
+    accounting: { tallySalesLedger: 'Sales', tallyTaxLedger: 'Output GST', xeroSalesAccount: '200', xeroTaxType: 'OUTPUT' },
     groups: { admins: 'CRM Administrators', managers: 'CRM Sales Managers', sales: 'CRM Sales', support: 'CRM Support', readers: 'CRM Readers' }
   };
 }
@@ -171,7 +224,14 @@ export function mergeSettings(saved: Partial<ICrmSettings> | undefined): ICrmSet
   out.assignment = { ...d.assignment, ...(saved.assignment || {}) };
   out.integrations = { ...d.integrations, ...(saved.integrations || {}) };
   out.quote = { ...d.quote, ...(saved.quote || {}) };
+  out.whatsapp = { ...d.whatsapp, ...(saved.whatsapp || {}) };
+  out.invoice = { ...d.invoice, ...(saved.invoice || {}) };
+  out.renewals = { ...d.renewals, ...(saved.renewals || {}) };
+  out.payments = { ...d.payments, ...(saved.payments || {}) };
+  out.accounting = { ...d.accounting, ...(saved.accounting || {}) };
   out.groups = { ...d.groups, ...(saved.groups || {}) };
   out.slaHours = { ...d.slaHours, ...(saved.slaHours || {}) };
+  out.firstResponseHours = { ...d.firstResponseHours, ...(saved.firstResponseHours || {}) };
+  out.businessHours = { ...d.businessHours, ...(saved.businessHours || {}) };
   return out;
 }

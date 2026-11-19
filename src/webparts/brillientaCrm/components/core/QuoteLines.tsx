@@ -69,6 +69,8 @@ const esc = (s: unknown): string => String(s ?? '').replace(/&/g, '&amp;').repla
 /** Builds a branded, print-ready quote document. */
 export function quoteHtml(q: IRecord, engine: Engine): string {
   const s = engine.settings;
+  const isInv = !!q.invoiceNumber;
+  const number = isInv ? q.invoiceNumber : q.quoteNumber;
   const c = s.company;
   const cur = s.currency;
   const money = (n: number): string => esc(fmtMoney(n, cur));
@@ -83,7 +85,7 @@ export function quoteHtml(q: IRecord, engine: Engine): string {
       <td class="n">${esc(i.quantity)}</td><td class="n">${money(i.unitPrice)}</td><td class="n">${i.discountPct ? `${esc(i.discountPct)}%` : ''}</td>
       <td class="n">${i.taxPct ? `${esc(i.taxPct)}%` : ''}</td><td class="n">${money(net)}</td></tr>`;
   }).join('');
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(q.quoteNumber)} - ${esc(q.title)}</title>
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(number)} - ${esc(q.title)}</title>
 <style>
  body{font-family:'Segoe UI',Arial,sans-serif;color:#222;margin:40px;font-size:13px}
  .top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #0f6cbd;padding-bottom:16px}
@@ -99,18 +101,22 @@ export function quoteHtml(q: IRecord, engine: Engine): string {
 <div class="noprint" style="text-align:right;margin-bottom:12px"><button onclick="window.print()">Print / Save as PDF</button></div>
 <div class="top"><div>${logo}<div style="margin-top:6px"><b>${esc(c.name)}</b><br><span class="muted">${esc(c.address).replace(/\n/g, '<br>')}</span><br>
 <span class="muted">${esc([c.email, c.phone, c.website].filter(Boolean).join(' · '))}</span>${c.taxId ? `<br><span class="muted">Tax ID: ${esc(c.taxId)}</span>` : ''}</div></div>
-<div style="text-align:right"><h1>QUOTE</h1><div><b>${esc(q.quoteNumber)}</b></div><div class="muted">Date: ${esc(fmtDate(q.created || new Date().toISOString()))}</div>
-<div class="muted">Valid until: ${esc(fmtDate(q.validUntil))}</div></div></div>
-<div class="grid"><div><div class="muted">Prepared for</div><b>${esc(acc?.title || '')}</b><br>${esc(con?.title || '')}${con?.email ? `<br>${esc(con.email)}` : ''}
+<div style="text-align:right"><h1>${isInv ? (q.invoiceStatus === 'Paid' ? 'INVOICE · PAID' : 'INVOICE') : 'QUOTE'}</h1><div><b>${esc(number)}</b></div>
+<div class="muted">Date: ${esc(fmtDate(q.issueDate || q.created || new Date().toISOString()))}</div>
+<div class="muted">${isInv ? `Due: ${esc(fmtDate(q.dueDate))}` : `Valid until: ${esc(fmtDate(q.validUntil))}`}</div></div></div>
+<div class="grid"><div><div class="muted">${isInv ? 'Bill to' : 'Prepared for'}</div><b>${esc(acc?.title || '')}</b><br>${esc(con?.title || '')}${con?.email ? `<br>${esc(con.email)}` : ''}
 ${acc ? `<br><span class="muted">${esc([acc.street, acc.city, acc.state, acc.postalCode, acc.country].filter(Boolean).join(', '))}</span>` : ''}</div>
 <div><div class="muted">Prepared by</div><b>${esc(q.owner?.title || engine.me?.title || '')}</b><br>${esc(q.owner?.email || engine.me?.email || '')}</div>
 <div><div class="muted">Reference</div><b>${esc(q.title)}</b></div></div>
 <table><thead><tr><th>Description</th><th class="n">Qty</th><th class="n">Unit price</th><th class="n">Discount</th><th class="n">Tax</th><th class="n">Amount</th></tr></thead><tbody>${rows}</tbody></table>
 <div class="tot"><div><span>Subtotal</span><span>${money(t.subtotal)}</span></div>${t.discountTotal ? `<div><span>Discount</span><span>−${money(t.discountTotal)}</span></div>` : ''}
-<div><span>Tax</span><span>${money(t.taxTotal)}</span></div><div class="grand"><span>Total (${esc(cur)})</span><span>${money(t.grandTotal)}</span></div></div>
-${q.terms ? `<div class="terms"><b>Terms &amp; conditions</b><br>${esc(q.terms)}</div>` : ''}
-<div class="sign"><div>Accepted by (name, signature)</div><div>Date</div></div>
-<div class="foot">${esc(s.quote.footer)}</div></body></html>`;
+<div><span>Tax</span><span>${money(t.taxTotal)}</span></div><div class="grand"><span>Total (${esc(cur)})</span><span>${money(t.grandTotal)}</span></div>
+${isInv && q.amountPaid ? `<div><span>Paid</span><span>−${money(q.amountPaid)}</span></div><div class="grand"><span>Balance due</span><span>${money(Math.max(0, t.grandTotal - q.amountPaid))}</span></div>` : ''}</div>
+${isInv && /^https:\/\//i.test(q.paymentLink || '') && q.invoiceStatus !== 'Paid' ? `<div class="terms"><b>Pay online:</b> <a href="${esc(q.paymentLink)}">${esc(q.paymentLink)}</a></div>` : ''}
+${isInv && s.invoice.bankDetails ? `<div class="terms"><b>Bank transfer</b><br>${esc(s.invoice.bankDetails)}</div>` : ''}
+${q.terms ? `<div class="terms"><b>${isInv ? 'Notes' : 'Terms &amp; conditions'}</b><br>${esc(q.terms)}</div>` : ''}
+${isInv ? '' : (q.signatureName ? `<div class="sign"><div><b>${esc(q.signatureName)}</b>${q.signatureTitle ? `, ${esc(q.signatureTitle)}` : ''}<br>Accepted electronically ${esc(fmtDate(q.signedDate, true))}</div><div>Ref ${esc(q.signatureId || '')}</div></div>` : '<div class="sign"><div>Accepted by (name, signature)</div><div>Date</div></div>')}
+<div class="foot">${esc(isInv ? s.invoice.footer : s.quote.footer)}</div></body></html>`;
 }
 
 export function printQuote(q: IRecord, engine: Engine): void {
@@ -130,7 +136,7 @@ export function printQuote(q: IRecord, engine: Engine): void {
   // Pop-ups blocked (e.g. Teams desktop): download the quote; open it and use Print / Save as PDF.
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([doc], { type: 'text/html' }));
-  a.download = `${String(q.quoteNumber || 'quote').replace(/[^\w-]/g, '_')}.html`;
+  a.download = `${String(q.invoiceNumber || q.quoteNumber || 'quote').replace(/[^\w-]/g, '_')}.html`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

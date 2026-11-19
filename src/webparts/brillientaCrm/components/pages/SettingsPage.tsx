@@ -57,7 +57,10 @@ const FlowPackDialog: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     if (/email$/.test(n) && !EMAIL_RE.test(v)) { return 'Enter a valid email address'; }
     return undefined;
   };
-  const anyInvalid = !pack || pack.env.some(e => !!invalid(e.schema, values[e.schema] || ''));
+  // Payment API keys are never typed into the browser: they are entered in Power Automate after import.
+  const isSecret = (schema: string): boolean => /razorpay|stripe|whatsapp/i.test(schema);
+  const shown = (pack?.env || []).filter(e => !isSecret(e.schema));
+  const anyInvalid = !pack || shown.some(e => !!invalid(e.schema, values[e.schema] || ''));
   const download = (): void => {
     downloadFlowPack(values).then(name => { setDone(name); notify(`Downloaded ${name}.`, MessageBarType.success); })
       .catch(e => setError(errorText(e)));
@@ -70,7 +73,7 @@ const FlowPackDialog: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       {pack && !done && (
         <Stack tokens={{ childrenGap: 8 }}>
           <Text variant="small">These values are written into the solution so the import is pre-filled. You can still change them during or after import.</Text>
-          {pack.env.map(e => (
+          {shown.map(e => (
             <TextField key={e.schema} label={e.name} description={e.description} value={values[e.schema] || ''}
               errorMessage={invalid(e.schema, values[e.schema] || '')} onChange={(_, v) => setValues({ ...values, [e.schema]: v || '' })} />
           ))}
@@ -86,6 +89,7 @@ const FlowPackDialog: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             <li>Create or pick the connections: <b>SharePoint</b>, <b>Office 365 Outlook</b>, <b>Approvals</b> (a service account is best).</li>
             <li>Check the environment variables (already filled in) › <b>Import</b>.</li>
             <li>Open the solution and <b>turn on</b> the flows you want.</li>
+            <li>Payments: in the solution › <b>Environment variables</b>, set the Razorpay key id/secret or the Stripe secret key, then add the HTTP URL of the “payment received” flow as a webhook in Razorpay (<code>payment_link.paid</code>) or Stripe (<code>checkout.session.completed</code>).</li>
             <li>Website / AppSource: copy the HTTP URL of the flow into Vercel (<code>CRM_WEBHOOK_URL</code>) or Partner Center.</li>
           </ol>
           <Text variant="small" className="crm-muted">Flows included: {pack.flows.map(f => f.name.replace('Brillienta CRM - ', '')).join(' · ')}</Text>
@@ -96,6 +100,40 @@ const FlowPackDialog: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         <DefaultButton text={done ? 'Close' : 'Cancel'} onClick={onClose} />
       </DialogFooter>
     </Dialog>
+  );
+};
+
+const CopilotAgentCard: React.FC = () => {
+  const { engine, notify } = useCrm();
+  const company = engine.settings.company.name || '';
+  const [name, setName] = React.useState(`${company ? `${company} ` : ''}CRM Copilot`.slice(0, 30));
+  const [busy, setBusy] = React.useState(false);
+  const site = engine.ds.rest.webUrl.replace(/\/$/, '');
+  const here = window.location.href.split(/[?#]/)[0];
+  const page = /\.aspx$/i.test(here) && here.toLowerCase().indexOf(site.toLowerCase()) === 0 ? here : `${site}/SitePages/Home.aspx`;
+  const download = (): void => {
+    setBusy(true);
+    import(/* webpackChunkName: 'brillienta-copilot-agent' */ '../../services/CopilotAgent')
+      .then(m => m.downloadCopilotAgent({ siteUrl: site, pageUrl: page, companyName: company, agentName: name.trim() || 'CRM Copilot' }))
+      .then(f => { setBusy(false); notify(`Downloaded ${f}.`, MessageBarType.success); })
+      .catch(e => { setBusy(false); notify(errorText(e), MessageBarType.error); });
+  };
+  return (
+    <Card title="Microsoft 365 Copilot agent" wide>
+      <Text variant="small" block>
+        A declarative agent for Microsoft 365 Copilot that answers from this CRM site (deals, accounts, cases, renewals, invoices) with each person&apos;s own SharePoint permissions,
+        and drafts customer emails. Needs Microsoft 365 Copilot licences. In every record, <b>Smart summary › Ask Copilot</b> hands the record over to Copilot.
+      </Text>
+      <Stack horizontal wrap verticalAlign="end" tokens={{ childrenGap: 12 }} style={{ margin: '10px 0 6px' }}>
+        <TextField label="Agent name" value={name} maxLength={30} onChange={(_, v) => setName(v || '')} styles={{ root: { width: 260 } }} />
+        <PrimaryButton iconProps={{ iconName: 'Download' }} text={busy ? 'Preparing…' : 'Download Copilot agent'} disabled={busy || !name.trim()} onClick={download} />
+      </Stack>
+      <ol className="crm-ul">
+        <li>Teams admin center › <b>Manage apps › Upload new app</b> (or Microsoft 365 admin center › Integrated apps › Upload custom apps) › select the zip.</li>
+        <li>Make it available to the sales and support teams. It appears in Copilot under <b>Agents</b>.</li>
+        <li>Download again after renaming the agent; the same app is updated.</li>
+      </ol>
+    </Card>
   );
 };
 
@@ -238,7 +276,38 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
                 <TextField label="Discount needing manager approval (%)" type="number" value={String(s.quote.approvalDiscountPct)}
                   description="Quotes with a higher total discount must be approved (Power Automate flow “Quote discount approval”). 0 = off."
                   onChange={(_, v) => upd({ quote: { ...s.quote, approvalDiscountPct: Math.max(0, Number(v) || 0) } })} />
+                <TextField label="E-signature link (HTTP URL of the flow “Quote e-signature”)" value={s.quote.signingUrl} placeholder="https://…"
+                  description="Customers open this link to review and sign quotes. Leave empty to turn e-signature off."
+                  errorMessage={s.quote.signingUrl && !/^https:\/\//i.test(s.quote.signingUrl) ? 'Must start with https://' : undefined}
+                  onChange={(_, v) => upd({ quote: { ...s.quote, signingUrl: (v || '').trim() } })} />
+                <Toggle label="Signed quote closes the opportunity as won" inlineLabel checked={s.quote.signatureClosesOpportunity}
+                  onChange={(_, v) => upd({ quote: { ...s.quote, signatureClosesOpportunity: !!v } })} />
                 <TextField label="Case number prefix" value={s.casePrefix} onChange={(_, v) => upd({ casePrefix: v || 'CS' })} />
+              </Stack>
+            </Card>
+            <Card title="Invoices & subscriptions">
+              <Stack tokens={{ childrenGap: 8 }}>
+                <TextField label="Invoice number prefix" value={s.invoice.prefix} onChange={(_, v) => upd({ invoice: { ...s.invoice, prefix: v || 'INV' } })} />
+                <TextField label="Payment terms (days)" type="number" value={String(s.invoice.paymentTermsDays)} onChange={(_, v) => upd({ invoice: { ...s.invoice, paymentTermsDays: Math.max(0, Number(v) || 0) } })} />
+                <TextField label="Bank transfer details (printed on invoices)" multiline rows={3} value={s.invoice.bankDetails} onChange={(_, v) => upd({ invoice: { ...s.invoice, bankDetails: v || '' } })} />
+                <TextField label="Invoice footer" value={s.invoice.footer} onChange={(_, v) => upd({ invoice: { ...s.invoice, footer: v || '' } })} />
+                <TextField label="Create renewal opportunity (days before renewal)" type="number" value={String(s.renewals.leadDays)}
+                  onChange={(_, v) => upd({ renewals: { ...s.renewals, leadDays: Math.max(1, Number(v) || 60) } })} />
+                <Toggle label="Create renewal opportunities automatically" inlineLabel checked={s.renewals.autoCreateOpportunities}
+                  onChange={(_, v) => upd({ renewals: { ...s.renewals, autoCreateOpportunities: !!v } })} />
+                <Dropdown label="Online payment links" selectedKey={s.payments.provider}
+                  options={[{ key: 'none', text: 'Off' }, { key: 'Razorpay', text: 'Razorpay (flow “Razorpay payment link”)' }, { key: 'Stripe', text: 'Stripe (flow “Stripe payment link”)' }]}
+                  onChange={(_, o) => upd({ payments: { provider: (o?.key as 'none' | 'Razorpay' | 'Stripe') || 'none' } })} />
+                <Text variant="small" className="crm-muted">API keys stay in Power Automate (environment variables), never in the browser.</Text>
+              </Stack>
+            </Card>
+            <Card title="Accounting export">
+              <Stack tokens={{ childrenGap: 8 }}>
+                <Text variant="small" className="crm-muted">Invoices › ⋯ › Export for accounting: Zoho Books, QuickBooks Online, Xero, Tally or generic CSV.</Text>
+                <TextField label="Tally sales ledger" value={s.accounting.tallySalesLedger} onChange={(_, v) => upd({ accounting: { ...s.accounting, tallySalesLedger: v || '' } })} />
+                <TextField label="Tally tax ledger" value={s.accounting.tallyTaxLedger} onChange={(_, v) => upd({ accounting: { ...s.accounting, tallyTaxLedger: v || '' } })} />
+                <TextField label="Xero sales account code" value={s.accounting.xeroSalesAccount} onChange={(_, v) => upd({ accounting: { ...s.accounting, xeroSalesAccount: v || '' } })} />
+                <TextField label="Xero tax type" value={s.accounting.xeroTaxType} onChange={(_, v) => upd({ accounting: { ...s.accounting, xeroTaxType: v || '' } })} />
               </Stack>
             </Card>
           </div>
@@ -321,10 +390,37 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
                 </Stack>
               </Stack>
             </Card>
-            <Card title="Service level agreements (hours to resolve)">
-              {['Critical', 'High', 'Normal', 'Low'].map(p => (
-                <TextField key={p} label={p} type="number" value={String(s.slaHours[p] ?? '')} onChange={(_, v) => upd({ slaHours: { ...s.slaHours, [p]: Number(v) || 0 } })} />
-              ))}
+            <Card title="Service level agreements">
+              <div className="crm-sla-table">
+                <Text variant="small" className="crm-muted">Priority</Text><Text variant="small" className="crm-muted">First response (h)</Text><Text variant="small" className="crm-muted">Resolve (h)</Text>
+                {['Critical', 'High', 'Normal', 'Low'].map(p => (
+                  <React.Fragment key={p}>
+                    <Text>{p}</Text>
+                    <TextField ariaLabel={`${p} first response hours`} type="number" value={String(s.firstResponseHours[p] ?? '')} onChange={(_, v) => upd({ firstResponseHours: { ...s.firstResponseHours, [p]: Math.max(0, Number(v) || 0) } })} />
+                    <TextField ariaLabel={`${p} resolution hours`} type="number" value={String(s.slaHours[p] ?? '')} onChange={(_, v) => upd({ slaHours: { ...s.slaHours, [p]: Math.max(0, Number(v) || 0) } })} />
+                  </React.Fragment>
+                ))}
+              </div>
+              <Toggle label="Pause the SLA clock while “Waiting on customer”" checked={s.slaPauseWhenWaiting} onChange={(_, c) => upd({ slaPauseWhenWaiting: !!c })} />
+              <Toggle label="Count business hours only" checked={s.businessHours.enabled} onChange={(_, c) => upd({ businessHours: { ...s.businessHours, enabled: !!c } })} />
+              {s.businessHours.enabled && (
+                <Stack tokens={{ childrenGap: 8 }}>
+                  <TextField label="Time zone (IANA)" value={s.businessHours.timeZone} description="e.g. Asia/Kolkata, Europe/London, America/New_York"
+                    onChange={(_, v) => upd({ businessHours: { ...s.businessHours, timeZone: (v || '').trim() } })} />
+                  <Stack horizontal tokens={{ childrenGap: 8 }}>
+                    <TextField label="Opens" value={s.businessHours.start} placeholder="09:00" styles={{ root: { width: 100 } }} onChange={(_, v) => upd({ businessHours: { ...s.businessHours, start: v || '' } })} />
+                    <TextField label="Closes" value={s.businessHours.end} placeholder="18:00" styles={{ root: { width: 100 } }} onChange={(_, v) => upd({ businessHours: { ...s.businessHours, end: v || '' } })} />
+                  </Stack>
+                  <Stack horizontal wrap tokens={{ childrenGap: 10 }}>
+                    {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d, i) => (
+                      <Checkbox key={d} label={d} checked={s.businessHours.days.indexOf(i) >= 0}
+                        onChange={(_, c) => upd({ businessHours: { ...s.businessHours, days: c ? [...s.businessHours.days, i].sort() : s.businessHours.days.filter(x => x !== i) } })} />
+                    ))}
+                  </Stack>
+                  <TextField label="Holidays (YYYY-MM-DD, one per line)" multiline rows={3} value={s.businessHours.holidays.join('\n')}
+                    onChange={(_, v) => upd({ businessHours: { ...s.businessHours, holidays: (v || '').split(/\s+/).filter(x => /^\d{4}-\d{2}-\d{2}$/.test(x)) } })} />
+                </Stack>
+              )}
             </Card>
             <Card title="Data visibility & compliance">
               <Toggle label="Sales reps only see their own records" checked={s.restrictRepsToOwnRecords} onChange={(_, c) => upd({ restrictRepsToOwnRecords: !!c })} />
@@ -339,7 +435,16 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
             <Card title="Microsoft 365 (Outlook & Teams)">
               <Toggle label="Send emails from Outlook (Microsoft Graph Mail.Send)" checked={s.integrations.graphEmail} onChange={(_, c) => upd({ integrations: { ...s.integrations, graphEmail: !!c } })} />
               <Toggle label="Create Teams meetings for demos (Calendars.ReadWrite)" checked={s.integrations.graphMeetings} onChange={(_, c) => upd({ integrations: { ...s.integrations, graphMeetings: !!c } })} />
-              <MessageBar isMultiline>A SharePoint/Global admin must approve the API access requests once: <b>SharePoint admin center › Advanced › API access</b> → approve “Microsoft Graph: Mail.Send, Calendars.ReadWrite, User.ReadBasic.All”.</MessageBar>
+              <Toggle label="Allow automatic Outlook email & meeting logging (Mail.Read)" checked={s.integrations.outlookSync} onChange={(_, c) => upd({ integrations: { ...s.integrations, outlookSync: !!c } })} />
+              {s.integrations.outlookSync && (
+                <Stack tokens={{ childrenGap: 6 }} style={{ marginBottom: 8 }}>
+                  <Text variant="small" className="crm-muted">Each user switches it on in <b>My work</b>. Only email and meetings with contacts and leads already in the CRM are logged.</Text>
+                  <TextField label="First sync reads the last (days)" type="number" value={String(s.integrations.syncLookbackDays)} onChange={(_, v) => upd({ integrations: { ...s.integrations, syncLookbackDays: Math.max(1, Math.min(365, Number(v) || 30)) } })} styles={{ root: { maxWidth: 220 } }} />
+                  <TextField label="Never log these domains (one per line)" multiline autoAdjustHeight rows={2} value={lines(s.integrations.internalDomains)}
+                    description="Your own email domain is always excluded." onChange={(_, v) => upd({ integrations: { ...s.integrations, internalDomains: parseLines(v || '') } })} />
+                </Stack>
+              )}
+              <MessageBar isMultiline>A SharePoint/Global admin must approve the API access requests once: <b>SharePoint admin center › Advanced › API access</b> → approve “Microsoft Graph: Mail.Send, Mail.Read, Calendars.ReadWrite, User.ReadBasic.All”.</MessageBar>
             </Card>
             <Card title="Teams channel notifications">
               <TextField label="Teams Workflows webhook URL" value={s.integrations.teamsWebhookUrl} disabled={!engine.hasFeature('webhooks')}
@@ -347,6 +452,42 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
                 description='In Teams: channel › ⋯ › Workflows › "Post to a channel when a webhook request is received". Posts deals won, new leads, demo requests, cases.' />
               <DefaultButton text="Send test" disabled={!s.integrations.teamsWebhookUrl} style={{ marginTop: 8 }}
                 onClick={() => engine.webhooks.test(s.integrations.teamsWebhookUrl).then(() => notify('Test sent.', MessageBarType.success)).catch(e => notify(errorText(e), MessageBarType.error))} />
+            </Card>
+            <CopilotAgentCard />
+            <Card title="WhatsApp Business" wide>
+              <Stack tokens={{ childrenGap: 8 }}>
+                <Stack horizontal wrap tokens={{ childrenGap: 16 }} verticalAlign="end">
+                  <Toggle label="WhatsApp on records" checked={s.whatsapp.enabled} onChange={(_, c) => upd({ whatsapp: { ...s.whatsapp, enabled: !!c } })} />
+                  <Dropdown label="How messages are sent" selectedKey={s.whatsapp.mode} styles={{ root: { width: 300 } }}
+                    options={[{ key: 'click', text: 'Click to chat (WhatsApp / WhatsApp Business app)' }, { key: 'cloud', text: 'WhatsApp Business Cloud API (Power Automate)' }]}
+                    onChange={(_, o) => upd({ whatsapp: { ...s.whatsapp, mode: (o?.key as 'click' | 'cloud') || 'click' } })} />
+                  <TextField label="Default country code" prefix="+" value={s.whatsapp.defaultCountryCode} styles={{ root: { width: 120 } }}
+                    onChange={(_, v) => upd({ whatsapp: { ...s.whatsapp, defaultCountryCode: (v || '').replace(/\D/g, '').slice(0, 4) } })} />
+                </Stack>
+                <Text variant="small" className="crm-muted">
+                  Cloud API: import the flows <b>WhatsApp send</b> and <b>WhatsApp inbound</b>, set the phone number ID and access token in Power Automate, and add the inbound flow URL as the webhook in Meta › WhatsApp › Configuration.
+                  Every message, sent or received, is logged on the contact or lead timeline; unknown senders become new leads.
+                </Text>
+                {s.whatsapp.templates.map((t, i) => {
+                  const setT = (patch: Partial<typeof t>): void => upd({ whatsapp: { ...s.whatsapp, templates: s.whatsapp.templates.map((x, j) => (j === i ? { ...x, ...patch } : x)) } });
+                  return (
+                    <div key={t.id} className="crm-wa-tpl">
+                      <Stack horizontal wrap tokens={{ childrenGap: 8 }} verticalAlign="end">
+                        <TextField label="Template" value={t.name} onChange={(_, v) => setT({ name: v || '' })} styles={{ root: { width: 180 } }} />
+                        <TextField label="Approved template name (Cloud API)" value={t.cloudName || ''} onChange={(_, v) => setT({ cloudName: (v || '').trim() })} styles={{ root: { width: 220 } }} />
+                        <TextField label="Language" value={t.language || ''} placeholder="en" onChange={(_, v) => setT({ language: (v || '').trim() })} styles={{ root: { width: 80 } }} />
+                        <TextField label="{{1}}, {{2}}… values" value={(t.params || []).join(', ')} placeholder="firstName, quoteNumber"
+                          onChange={(_, v) => setT({ params: (v || '').split(',').map(x => x.trim()).filter(Boolean) })} styles={{ root: { width: 240 } }} />
+                        <IconButton iconProps={{ iconName: 'Delete' }} ariaLabel="Remove template" onClick={() => upd({ whatsapp: { ...s.whatsapp, templates: s.whatsapp.templates.filter((_, j) => j !== i) } })} />
+                      </Stack>
+                      <TextField label="Message" multiline rows={2} value={t.body} onChange={(_, v) => setT({ body: v || '' })} />
+                    </div>
+                  );
+                })}
+                <DefaultButton iconProps={{ iconName: 'Add' }} text="Add WhatsApp template" styles={{ root: { alignSelf: 'flex-start' } }}
+                  onClick={() => upd({ whatsapp: { ...s.whatsapp, templates: [...s.whatsapp.templates, { id: `t${Date.now()}`, name: 'New template', body: 'Hi {{firstName}}, ', language: 'en', params: ['firstName'] }] } })} />
+                <Text variant="small" className="crm-muted">Placeholders: {'{{firstName}} {{fullName}} {{company}} {{senderName}} {{companyName}} {{quoteNumber}} {{invoiceNumber}} {{total}} {{paymentLink}} {{scheduledDate}} {{meetingLink}} {{caseNumber}}'}</Text>
+              </Stack>
             </Card>
             <Card title="Power Automate flow pack" wide>
               <Stack horizontal wrap verticalAlign="center" tokens={{ childrenGap: 12 }} style={{ marginBottom: 6 }}>
@@ -362,6 +503,11 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
                 <li><b>Case SLA escalation</b> – hourly; escalates newly breached cases</li>
                 <li><b>Deal won handoff</b> – notifies finance and creates a customer folder</li>
                 <li><b>Quote discount approval</b> – Approvals in Teams/Outlook for quotes over {s.quote.approvalDiscountPct}% discount</li>
+                <li><b>Quote e-signature</b> – signing page for customers; records name, title, IP and time <i>(Premium)</i></li>
+                <li><b>WhatsApp send / inbound</b> – WhatsApp Business Cloud API: queued messages and templates out, replies and new leads in <i>(Premium)</i></li>
+                <li><b>Email to case</b> – support mailbox → cases; replies with [case number] go to the same case</li>
+                <li><b>Razorpay / Stripe payment link</b> – creates a pay link when an invoice asks for one <i>(Premium)</i></li>
+                <li><b>Razorpay / Stripe payment received</b> – payment webhook marks the invoice Paid <i>(Premium)</i></li>
               </ul>
             </Card>
             <Card title="Microsoft AppSource / Partner Center leads">

@@ -5,7 +5,7 @@ import { useCrm, useEntities } from '../CrmContext';
 import { DateTimeField, Pill, UserPicker } from './controls';
 import { errorText, fmtDate, isOverdue } from '../utils';
 
-const ICONS: Record<string, string> = { Call: 'Phone', Email: 'Mail', Meeting: 'Group', Note: 'QuickNote', Task: 'TaskSolid' };
+const ICONS: Record<string, string> = { Call: 'Phone', Email: 'Mail', Meeting: 'Group', WhatsApp: 'Chat', Note: 'QuickNote', Task: 'TaskSolid' };
 
 export const ActivityIcon: React.FC<{ type: string }> = ({ type }) => <span className="crm-act-icon"><Icon iconName={ICONS[type] || 'QuickNote'} /></span>;
 
@@ -25,10 +25,11 @@ export const ActivityRow: React.FC<{ a: IRecord; showRelated?: boolean }> = ({ a
           {a.activityType === 'Task' && <Checkbox label="Done" checked={!!a.completed} disabled={!canEdit} onChange={(_, c) => toggle(!!c)} />}
         </Stack>
         {a.details && <Text variant="small" block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{a.details.length > 600 ? `${a.details.slice(0, 600)}…` : a.details}</Text>}
+        {/^https:\/\//i.test(a.webLink || '') && <Link href={a.webLink} target="_blank" rel="noopener noreferrer" styles={{ root: { fontSize: 12 } }}>Open in Outlook</Link>}
         <Text variant="small" block className="crm-muted">
           {relDef && a.relatedId ? <><Link onClick={() => { const r = engine.find(relDef.key, a.relatedId); if (r) { open(relDef.key, r); } }}>{relDef.singular}: {engine.display(relDef.key, a.relatedId)}</Link> · </> : null}
-          {a.activityType} · {a.author?.title || ''} · {fmtDate(a.created, true)}
-          {a.dueDate && <> · due {fmtDate(a.dueDate, true)}</>}
+          {a.activityType}{a.activitySource === 'Outlook' ? ' · from Outlook' : ''}{a.waStatus ? ` · ${a.waStatus}` : ''} · {a.activitySource === 'Outlook' || a.activitySource === 'WhatsApp' ? fmtDate(a.dueDate || a.created, true) : `${a.author?.title || ''} · ${fmtDate(a.created, true)}`}
+          {a.dueDate && a.activitySource !== 'Outlook' && a.activitySource !== 'WhatsApp' && <> · due {fmtDate(a.dueDate, true)}</>}
           {a.owner && <> · {a.owner.title}</>}
           {a.activityType === 'Task' && !a.completed && isOverdue(a.dueDate) && <> <Pill text="Overdue" /></>}
         </Text>

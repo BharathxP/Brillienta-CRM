@@ -5,7 +5,8 @@ import { useCrm, useEntities } from '../CrmContext';
 import { ActivityRow } from '../core/ActivityTimeline';
 import { Pill, ScoreBadge } from '../core/controls';
 import { Card } from './Dashboard';
-import { fmtDate, fmtMoney, isOverdue } from '../utils';
+import { OutlookSyncCard } from '../core/OutlookSyncCard';
+import { fmtDate, fmtMoney, isOverdue, slaBreached } from '../utils';
 
 /** Personal work queue: tasks, follow-ups, demos, deals closing, cases at risk. */
 export const MyWork: React.FC = () => {
@@ -43,6 +44,7 @@ export const MyWork: React.FC = () => {
         <Text variant="large" styles={{ root: { fontWeight: 600 } }}>{total ? `You have ${total} item(s) that need attention` : 'You are all caught up'}</Text>
         {engine.can('create', 'activities') && <PrimaryButton iconProps={{ iconName: 'Add' }} text="New task" onClick={() => open('activities', { activityType: 'Task', completed: false, owner: engine.me })} />}
       </Stack>
+      <OutlookSyncCard />
       <div className="crm-dash-grid">
         <Card title={`Overdue tasks (${overdue.length})`}>{overdue.length ? overdue.map(a => <ActivityRow key={a.id} a={a} showRelated />) : <Text className="crm-muted">None 🎉</Text>}</Card>
         <Card title={`Due today (${today.length})`}>{today.length ? today.map(a => <ActivityRow key={a.id} a={a} showRelated />) : <Text className="crm-muted">Nothing due today.</Text>}</Card>
@@ -61,7 +63,7 @@ export const MyWork: React.FC = () => {
         </Card>
         {engine.hasFeature('cases') && (
           <Card title={`My open cases (${cases.length})`} action={<Link onClick={() => undefined}> </Link>}>
-            {cases.length ? cases.map(c => <Row key={c.id} k="cases" r={c} sub={<><Pill text={c.priority} /> SLA {fmtDate(c.slaDue, true)} {isOverdue(c.slaDue) && <Pill text="Breached" />}</>} />) : <Text className="crm-muted">No open cases.</Text>}
+            {cases.length ? cases.map(c => <Row key={c.id} k="cases" r={c} sub={<><Pill text={c.priority} /> SLA {fmtDate(c.slaDue, true)} {slaBreached(c) && <Pill text="Breached" />}{c.slaPausedAt && <span className="crm-muted"> paused</span>}</>} />) : <Text className="crm-muted">No open cases.</Text>}
           </Card>
         )}
       </div>

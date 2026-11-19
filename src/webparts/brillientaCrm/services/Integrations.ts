@@ -2,6 +2,18 @@
 import { MSGraphClientFactory, MSGraphClientV3 } from '@microsoft/sp-http-msgraph';
 import { IWebhook } from '../models/settings';
 
+export interface IGraphAddress { emailAddress?: { address?: string; name?: string } }
+export interface IGraphMessage {
+  id: string; internetMessageId?: string; conversationId?: string; subject?: string; bodyPreview?: string;
+  from?: IGraphAddress; toRecipients?: IGraphAddress[]; ccRecipients?: IGraphAddress[];
+  receivedDateTime?: string; sentDateTime?: string; webLink?: string;
+}
+export interface IGraphEvent {
+  id: string; iCalUId?: string; subject?: string; bodyPreview?: string; isCancelled?: boolean; webLink?: string;
+  start?: { dateTime: string; timeZone: string }; end?: { dateTime: string; timeZone: string };
+  attendees?: IGraphAddress[]; organizer?: IGraphAddress; onlineMeeting?: { joinUrl?: string };
+}
+
 export interface IMeetingResult {
   joinUrl: string;
   webLink: string;
@@ -74,6 +86,44 @@ export class GraphService {
         allowNewTimeProposals: true
       });
       return { joinUrl: ev?.onlineMeeting?.joinUrl || ev?.onlineMeetingUrl || '', webLink: ev?.webLink || '', eventId: ev?.id };
+    } catch (e) {
+      throw this.explain(e);
+    }
+  }
+
+  /** Reads messages from a mail folder (inbox / sentitems) newer than `sinceIso`, newest first. */
+  public async listMessages(folder: 'inbox' | 'sentitems', sinceIso: string, max: number = 300): Promise<IGraphMessage[]> {
+    try {
+      const client = await this.graph();
+      const field = folder === 'sentitems' ? 'sentDateTime' : 'receivedDateTime';
+      let res: any = await client.api(`/me/mailFolders/${folder}/messages`)
+        .select('id,internetMessageId,conversationId,subject,bodyPreview,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,webLink')
+        .filter(`${field} ge ${sinceIso}`).orderby(`${field} desc`).top(50).get();
+      const out: IGraphMessage[] = [...(res.value || [])];
+      while (res['@odata.nextLink'] && out.length < max) {
+        res = await client.api(res['@odata.nextLink']).get();
+        out.push(...(res.value || []));
+      }
+      return out.slice(0, max);
+    } catch (e) {
+      throw this.explain(e);
+    }
+  }
+
+  /** Reads calendar events between two dates (expanded recurrences). */
+  public async listEvents(startIso: string, endIso: string, max: number = 300): Promise<IGraphEvent[]> {
+    try {
+      const client = await this.graph();
+      let res: any = await client.api('/me/calendarView')
+        .query({ startDateTime: startIso, endDateTime: endIso })
+        .select('id,iCalUId,subject,bodyPreview,start,end,attendees,organizer,isCancelled,webLink,onlineMeeting')
+        .orderby('start/dateTime').top(100).get();
+      const out: IGraphEvent[] = [...(res.value || [])];
+      while (res['@odata.nextLink'] && out.length < max) {
+        res = await client.api(res['@odata.nextLink']).get();
+        out.push(...(res.value || []));
+      }
+      return out.slice(0, max);
     } catch (e) {
       throw this.explain(e);
     }

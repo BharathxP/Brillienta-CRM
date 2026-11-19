@@ -4,6 +4,9 @@ import { GraphService, WebhookService } from './Integrations';
 import { CrmData, EntityKey, IEntityDef, IRecord, IUserRef, LOST, WON } from '../models/model';
 import { ICrmSettings } from '../models/settings';
 import { ILicenseInfo } from '../models/license';
+import { addBusinessHours, businessHoursBetween } from './BusinessHours';
+import { waNumber } from './WhatsApp';
+import { fmtMoney } from '../components/utils';
 
 export type Action = 'read' | 'create' | 'edit' | 'delete' | 'import' | 'export' | 'bulk' | 'admin' | 'reports' | 'forecast';
 
@@ -37,7 +40,7 @@ export interface IConvertOptions {
   expectedCloseDate?: string;
 }
 
-const SALES_EDIT: EntityKey[] = ['leads', 'accounts', 'contacts', 'opportunities', 'quotes', 'demos', 'activities', 'cases'];
+const SALES_EDIT: EntityKey[] = ['leads', 'accounts', 'contacts', 'opportunities', 'quotes', 'demos', 'activities', 'cases', 'subscriptions', 'invoices'];
 const SUPPORT_EDIT: EntityKey[] = ['cases', 'contacts', 'accounts', 'activities'];
 const ENTERPRISE_FEATURES = ['cases', 'campaigns', 'forecast', 'webhooks', 'customFields', 'audit', 'security'];
 
@@ -56,6 +59,24 @@ export function quoteTotals(items: ILineItem[] = []): IQuoteTotals {
   const r = (n: number): number => Math.round(n * 100) / 100;
   return { subtotal: r(subtotal), discountTotal: r(discountTotal), taxTotal: r(taxTotal), grandTotal: r(subtotal - discountTotal + taxTotal) };
 }
+
+const DAY = 86400000;
+const dayKey = (iso?: string): string => (iso ? new Date(iso).toISOString().slice(0, 10) : '');
+
+/** Adds whole billing periods to a date (Monthly → months, Annual/other → years). */
+export function addPeriod(iso: string | undefined, cycle: string, n: number = 1): string {
+  const d = iso ? new Date(iso) : new Date();
+  if (cycle === 'Monthly') { d.setMonth(d.getMonth() + n); } else { d.setFullYear(d.getFullYear() + n); }
+  return d.toISOString();
+}
+
+/** Monthly recurring revenue of a subscription. */
+export function subscriptionMrr(s: IRecord): number {
+  const period = (Number(s.quantity) || 0) * (Number(s.unitPrice) || 0);
+  return Math.round((s.billingCycle === 'Monthly' ? period : period / 12) * 100) / 100;
+}
+
+export interface IMaintenanceResult { renewals: number; overdue: number; expired: number; rolled: number }
 
 export class Engine {
   public data: CrmData = {};
@@ -211,10 +232,20 @@ export class Engine {
     return `${head}${('000' + (max + 1)).slice(-Math.max(4, String(max + 1).length))}`;
   }
 
+  /** Resolution SLA deadline, counted in business hours when they are switched on. */
   public slaDue(priority: string, fromIso?: string): string {
     const hours = this.settings.slaHours[priority] ?? 24;
-    const from = fromIso ? new Date(fromIso) : new Date();
-    return new Date(from.getTime() + hours * 3600000).toISOString();
+    return addBusinessHours(fromIso ? new Date(fromIso) : new Date(), hours, this.settings.businessHours).toISOString();
+  }
+
+  public firstResponseDue(priority: string, fromIso?: string): string {
+    const hours = this.settings.firstResponseHours[priority] ?? 8;
+    return addBusinessHours(fromIso ? new Date(fromIso) : new Date(), hours, this.settings.businessHours).toISOString();
+  }
+
+  public caseNumberFor(id: number, createdIso?: string): string {
+    const year = (createdIso ? new Date(createdIso) : new Date()).getFullYear();
+    return `${this.settings.casePrefix || 'CS'}-${year}-${('000' + id).slice(-Math.max(4, String(id).length))}`;
   }
 
   public findDuplicates(key: EntityKey, r: IRecord): IRecord[] {
@@ -247,6 +278,7 @@ export class Engine {
       case 'leads':
         x.title = `${x.firstName || ''} ${x.lastName || ''}`.trim() || x.email || x.company || 'Lead';
         x.leadScore = this.scoreLead({ ...prev, ...x });
+        if ('phone' in x) { x.whatsapp = waNumber(x.phone, this.settings.whatsapp.defaultCountryCode); }
         if (isNew && !x.owner && this.settings.assignment.autoAssignNewLeads) {
           // eslint-disable-next-line require-atomic-updates -- x is a local copy
           x.owner = await this.nextRoundRobin();
@@ -254,6 +286,7 @@ export class Engine {
         break;
       case 'contacts':
         x.title = `${x.firstName || ''} ${x.lastName || ''}`.trim() || x.email || 'Contact';
+        if ('phone' in x || 'mobile' in x) { x.whatsapp = waNumber(x.mobile || x.phone, this.settings.whatsapp.defaultCountryCode); }
         if (x.marketingConsent && !(prev && prev.marketingConsent) && !x.consentDate) { x.consentDate = new Date().toISOString(); }
         break;
       case 'opportunities': {
@@ -280,6 +313,10 @@ export class Engine {
         if (!x.validUntil) { x.validUntil = new Date(Date.now() + this.settings.quote.validityDays * 86400000).toISOString(); }
         if (!x.terms && isNew) { x.terms = this.settings.quote.terms; }
         const t = quoteTotals(x.lineItems || []);
+        if (prev && prev.signatureStatus === 'Signed' && (Math.abs((prev.grandTotal || 0) - t.grandTotal) > 0.005 || JSON.stringify(prev.lineItems || []) !== JSON.stringify(x.lineItems || []))) {
+          throw new Error('This quote was signed electronically, so its line items can no longer change. Create a new quote for the changes.');
+        }
+        if (!x.currency) { x.currency = this.settings.currency || 'USD'; }
         Object.keys(t).forEach(k => { x[k] = (t as any)[k]; });
         // Any price change after approval requires a new approval.
         if (prev && prev.approvalStatus === 'Approved' && Math.abs((prev.grandTotal || 0) - t.grandTotal) > 0.005) {
@@ -289,16 +326,62 @@ export class Engine {
         if (!x.title) { x.title = `Quote for ${this.display('accounts', x.accountRef) || 'customer'}`; }
         break;
       }
-      case 'cases':
-        if (isNew || !x.caseNumber) {
-          await this.ensure(['cases']);
-          // eslint-disable-next-line require-atomic-updates -- x is a local copy
-          x.caseNumber = this.nextNumber('cases', 'caseNumber', this.settings.casePrefix || 'CS');
+      case 'cases': {
+        // Case numbers come from the SharePoint item ID (set right after the first save), so cases created by
+        // Power Automate (email-to-case, website) and in the CRM never collide.
+        if (!isNew && !x.caseNumber) { x.caseNumber = this.caseNumberFor(x.id!, prev?.created); }
+        const created = prev?.created || new Date().toISOString();
+        if (isNew || (prev && prev.priority !== x.priority) || !x.slaDue) {
+          x.slaDue = this.slaDue(x.priority || 'Normal', created);
         }
-        if (isNew || (prev && prev.priority !== x.priority)) { x.slaDue = this.slaDue(x.priority || 'Normal', prev?.created); }
+        if (!x.firstResponseDue && !x.firstRespondedAt) { x.firstResponseDue = this.firstResponseDue(x.priority || 'Normal', created); }
+        if (prev && !prev.firstRespondedAt && !x.firstRespondedAt && prev.caseStatus === 'New' && x.caseStatus && x.caseStatus !== 'New') {
+          x.firstRespondedAt = new Date().toISOString();
+        }
+        const waiting = x.caseStatus === 'Waiting on customer';
+        if (waiting && this.settings.slaPauseWhenWaiting && !(prev && prev.slaPausedAt)) { x.slaPausedAt = new Date().toISOString(); }
+        if (!waiting && (prev?.slaPausedAt || x.slaPausedAt)) {
+          // Resume: push the deadline out by the working time spent waiting on the customer.
+          const paused = businessHoursBetween(new Date(prev?.slaPausedAt || x.slaPausedAt), new Date(), this.settings.businessHours);
+          if (x.slaDue && paused > 0) { x.slaDue = addBusinessHours(new Date(x.slaDue), paused, this.settings.businessHours).toISOString(); }
+          x.slaPausedAt = undefined;
+        }
         if ((x.caseStatus === 'Resolved' || x.caseStatus === 'Closed') && !(prev && prev.resolvedDate)) { x.resolvedDate = new Date().toISOString(); }
         if (x.caseStatus && x.caseStatus !== 'Resolved' && x.caseStatus !== 'Closed' && prev?.resolvedDate) { x.resolvedDate = undefined; }
         break;
+      }
+      case 'subscriptions': {
+        if (!x.billingCycle) { x.billingCycle = 'Annual'; }
+        if (x.quantity === undefined || x.quantity === null) { x.quantity = 1; }
+        if (!x.startDate && isNew) { x.startDate = new Date().toISOString(); }
+        if (!x.renewalDate && x.startDate) { x.renewalDate = addPeriod(x.startDate, x.billingCycle); }
+        x.mrr = subscriptionMrr(x);
+        x.arr = Math.round(x.mrr * 12 * 100) / 100;
+        if ((x.subStatus === 'Cancelled' || x.subStatus === 'Expired') && !x.endDate) { x.endDate = x.renewalDate || new Date().toISOString(); }
+        if (!x.title) { x.title = `${this.display('products', x.productRef) || 'Subscription'} - ${this.display('accounts', x.accountRef) || 'customer'}`; }
+        break;
+      }
+      case 'invoices': {
+        const inv = this.settings.invoice;
+        if (isNew || !x.invoiceNumber) {
+          await this.ensure(['invoices']);
+          // eslint-disable-next-line require-atomic-updates -- x is a local copy
+          x.invoiceNumber = this.nextNumber('invoices', 'invoiceNumber', inv.prefix || 'INV');
+        }
+        if (!x.issueDate) { x.issueDate = new Date().toISOString(); }
+        if (!x.currency) { x.currency = this.settings.currency || 'USD'; }
+        if (!x.dueDate) { x.dueDate = new Date(new Date(x.issueDate).getTime() + (inv.paymentTermsDays || 0) * DAY).toISOString(); }
+        if (!x.terms && isNew) { x.terms = inv.footer; }
+        const t = quoteTotals(x.lineItems || []);
+        Object.keys(t).forEach(k => { x[k] = (t as any)[k]; });
+        if (x.invoiceStatus !== 'Void' && t.grandTotal > 0 && (Number(x.amountPaid) || 0) >= t.grandTotal - 0.005) { x.invoiceStatus = 'Paid'; }
+        if (x.invoiceStatus === 'Paid') {
+          if (!x.paidDate) { x.paidDate = new Date().toISOString(); }
+          if (!x.amountPaid) { x.amountPaid = t.grandTotal; }
+        }
+        if (!x.title) { x.title = `Invoice for ${this.display('accounts', x.accountRef) || 'customer'}`; }
+        break;
+      }
       case 'demos':
         if (x.scheduledDate && (x.status === 'Requested' || !x.status)) { x.status = 'Scheduled'; }
         if (!x.title) { x.title = `Demo - ${x.company || x.contactName || ''}`.trim(); }
@@ -354,6 +437,17 @@ export class Engine {
       if (x.quoteStatus === 'Sent') { this.webhooks.emit('quote.sent', data, summary('Quote sent')); }
       if (x.quoteStatus === 'Accepted') { this.webhooks.emit('quote.accepted', data, summary('Quote accepted')); }
     }
+    if (key === 'invoices' && prev && prev.invoiceStatus !== x.invoiceStatus) {
+      if (x.invoiceStatus === 'Sent') { this.webhooks.emit('invoice.sent', data, summary('Invoice sent')); }
+      if (x.invoiceStatus === 'Paid') { this.webhooks.emit('invoice.paid', data, `💰 Invoice paid: ${x.invoiceNumber} (${x.grandTotal || 0} ${this.settings.currency})`); }
+      if (x.invoiceStatus === 'Overdue') { this.webhooks.emit('invoice.overdue', data, summary('Invoice overdue')); }
+    }
+    if (key === 'subscriptions' && prev && prev.subStatus !== x.subStatus && x.subStatus === 'Cancelled') {
+      this.webhooks.emit('subscription.cancelled', data, summary('Subscription cancelled'));
+    }
+    if (key === 'opportunities' && x.dealType === 'Renewal' && x.subscriptionRef && prev && prev.stage !== x.stage && (x.stage === WON || x.stage === LOST)) {
+      this.applyRenewalOutcome(x).catch(() => undefined);
+    }
     if (key === 'cases' && prev && prev.caseStatus !== x.caseStatus && x.caseStatus === 'Resolved') {
       this.webhooks.emit('case.resolved', data, summary('Case resolved'));
     }
@@ -376,6 +470,7 @@ export class Engine {
     const prev = r.id ? this.find(key, r.id) : undefined;
     const x = await this.beforeSave(key, r, prev);
     const id = await this.ds.save(key, x);
+    if (key === 'cases' && !x.caseNumber) { await this.ds.save('cases', { id, caseNumber: this.caseNumberFor(id) }); }
     const fresh = await this.ds.getOne(key, id);
     this.upsertCache(key, fresh);
     const changes = this.diff(key, prev, x);
@@ -489,6 +584,195 @@ export class Engine {
     }
   }
 
+  // ------------------------------------------------------------------ subscriptions, renewals and invoicing
+
+  /** Recurring quote lines (Monthly/Annual) become subscriptions on the quote's account. */
+  public async createSubscriptionsFromQuote(q: IRecord): Promise<IRecord[]> {
+    const lines = ((q.lineItems || []) as ILineItem[]).filter(i => i.billing === 'Monthly' || i.billing === 'Annual');
+    const out: IRecord[] = [];
+    for (const i of lines) {
+      const perSeat = (Number(i.unitPrice) || 0) * (1 - (Number(i.discountPct) || 0) / 100);
+      out.push(await this.save('subscriptions', {
+        title: `${i.name} - ${this.display('accounts', q.accountRef) || 'customer'}`,
+        accountRef: q.accountRef, contactRef: q.contactRef, productRef: i.productId, opportunityRef: q.opportunityRef, quoteRef: q.id,
+        subStatus: 'Active', billingCycle: i.billing, quantity: Number(i.quantity) || 1, unitPrice: Math.round(perSeat * 100) / 100,
+        startDate: new Date().toISOString(), autoRenew: true, owner: q.owner || this.me
+      }));
+    }
+    if (out.length) {
+      await this.logActivity('quotes', q.id!, `${out.length} subscription${out.length === 1 ? '' : 's'} created`, out.map(s => s.title).join('\n'));
+      out.forEach(s => this.webhooks.emit('subscription.created', { id: s.id, entity: 'subscriptions', ...this.plain(s) }, `New subscription: ${s.title}`));
+    }
+    return out;
+  }
+
+  public async createInvoiceFromQuote(q: IRecord): Promise<IRecord> {
+    return this.save('invoices', {
+      title: q.title, accountRef: q.accountRef, contactRef: q.contactRef, quoteRef: q.id, opportunityRef: q.opportunityRef,
+      invoiceStatus: 'Draft', lineItems: (q.lineItems || []).map((i: ILineItem) => ({ ...i })), owner: q.owner || this.me
+    });
+  }
+
+  /** Invoice for the next billing period of a subscription. */
+  public async createInvoiceFromSubscription(s: IRecord): Promise<IRecord> {
+    const from = s.renewalDate && new Date(s.renewalDate).getTime() > Date.now() ? addPeriod(s.renewalDate, s.billingCycle, -1) : (s.renewalDate || s.startDate);
+    const to = addPeriod(from, s.billingCycle);
+    const product = s.productRef ? this.find('products', s.productRef) : undefined;
+    const period = `${new Date(from).toLocaleDateString()} – ${new Date(new Date(to).getTime() - DAY).toLocaleDateString()}`;
+    return this.save('invoices', {
+      title: `${s.title} (${period})`, accountRef: s.accountRef, contactRef: s.contactRef, subscriptionRef: s.id, invoiceStatus: 'Draft',
+      lineItems: [{
+        id: String(Date.now()), productId: s.productRef, name: product?.title || s.title || 'Subscription', description: `${s.billingCycle} subscription, ${period}`,
+        quantity: Number(s.quantity) || 1, unitPrice: Number(s.unitPrice) || 0, discountPct: 0, taxPct: Number(product?.taxRate) || 0, billing: s.billingCycle
+      }],
+      owner: s.owner || this.me
+    });
+  }
+
+  public async recordPayment(inv: IRecord, amount: number, provider?: string, reference?: string): Promise<IRecord> {
+    const paid = Math.round(((Number(inv.amountPaid) || 0) + amount) * 100) / 100;
+    const saved = await this.patch('invoices', inv.id!, {
+      amountPaid: paid, paymentProvider: provider || inv.paymentProvider, externalPaymentId: reference || inv.externalPaymentId,
+      ...(paid >= (inv.grandTotal || 0) - 0.005 ? { invoiceStatus: 'Paid', paidDate: new Date().toISOString() } : {})
+    });
+    await this.logActivity('invoices', inv.id!, `Payment recorded: ${amount} ${this.settings.currency}`, [provider, reference].filter(Boolean).join(' · '));
+    return saved;
+  }
+
+  /** A won renewal extends the subscription one period; a lost renewal cancels it at the renewal date. */
+  private async applyRenewalOutcome(opp: IRecord): Promise<void> {
+    await this.ensure(['subscriptions']);
+    const s = this.find('subscriptions', opp.subscriptionRef);
+    if (!s) { return; }
+    if (opp.stage === WON) {
+      const saved = await this.patch('subscriptions', s.id!, { subStatus: 'Active', renewalDate: addPeriod(s.renewalDate, s.billingCycle), endDate: undefined });
+      await this.logActivity('subscriptions', s.id!, 'Renewed', `Renewal ${opp.title} won. Next renewal ${new Date(saved.renewalDate).toLocaleDateString()}.`);
+      this.webhooks.emit('subscription.renewed', { id: s.id, entity: 'subscriptions', ...this.plain(saved) }, `Subscription renewed: ${s.title}`);
+    } else {
+      await this.patch('subscriptions', s.id!, { subStatus: 'Cancelled', autoRenew: false, endDate: s.renewalDate });
+    }
+  }
+
+  /**
+   * Housekeeping that a server would normally do, run when a manager/admin opens the app (at most every 6 hours):
+   * renewal opportunities ahead of annual renewals, overdue invoices, expired subscriptions, monthly roll-over.
+   */
+  public async runMaintenance(force: boolean = false): Promise<IMaintenanceResult> {
+    const res: IMaintenanceResult = { renewals: 0, overdue: 0, expired: 0, rolled: 0 };
+    if (!this.license?.canWrite || !(this.role === 'admin' || this.role === 'manager')) { return res; }
+    const lsKey = `brillienta-crm:maintenance:${this.ds.rest.webUrl}`;
+    try {
+      const last = Number(window.localStorage.getItem(lsKey) || 0);
+      if (!force && Date.now() - last < 6 * 3600000) { return res; }
+      window.localStorage.setItem(lsKey, String(Date.now()));
+    } catch { /* storage unavailable: run anyway */ }
+    await this.ensure(['subscriptions', 'invoices', 'opportunities']);
+    const now = Date.now();
+    const r = this.settings.renewals;
+    for (const s of this.data.subscriptions || []) {
+      const due = s.renewalDate ? new Date(s.renewalDate).getTime() : 0;
+      const live = s.subStatus === 'Active' || s.subStatus === 'Pending renewal' || s.subStatus === 'Trial';
+      if (!live || !due) { continue; }
+      if (due < now && !s.autoRenew) {
+        await this.patch('subscriptions', s.id!, { subStatus: 'Expired', endDate: s.renewalDate });
+        res.expired++;
+      } else if (due < now && s.billingCycle === 'Monthly') {
+        let next = s.renewalDate;
+        while (new Date(next).getTime() < now) { next = addPeriod(next, 'Monthly'); }
+        await this.patch('subscriptions', s.id!, { renewalDate: next });
+        res.rolled++;
+      } else if (r.autoCreateOpportunities && s.billingCycle !== 'Monthly' && due - now <= r.leadDays * DAY) {
+        const exists = (this.data.opportunities || []).some(o => o.subscriptionRef === s.id && o.dealType === 'Renewal' && dayKey(o.expectedCloseDate) === dayKey(s.renewalDate));
+        if (exists) { continue; }
+        const stages = this.openStages();
+        await this.save('opportunities', {
+          title: `Renewal ${new Date(s.renewalDate).getFullYear()} - ${s.title}`, dealType: 'Renewal', subscriptionRef: s.id,
+          accountRef: s.accountRef, contactRef: s.contactRef, stage: stages[Math.min(2, stages.length - 1)] || stages[0],
+          amount: Math.round((s.arr || subscriptionMrr(s) * 12) * 100) / 100, expectedCloseDate: s.renewalDate,
+          owner: s.owner || this.me, notes: `Automatic renewal opportunity for subscription #${s.id}.`
+        });
+        if (s.subStatus !== 'Pending renewal') { await this.patch('subscriptions', s.id!, { subStatus: 'Pending renewal' }); }
+        res.renewals++;
+      }
+    }
+    for (const inv of this.data.invoices || []) {
+      if (inv.invoiceStatus === 'Sent' && inv.dueDate && new Date(inv.dueDate).getTime() < now - DAY) {
+        await this.patch('invoices', inv.id!, { invoiceStatus: 'Overdue' });
+        res.overdue++;
+      }
+    }
+    return res;
+  }
+
+  /**
+   * Completes cases created outside the CRM (email-to-case and website flows): case number, business-hours SLA
+   * deadlines, and resuming SLAs that a flow re-opened while paused. Runs for support/managers/admins on open.
+   */
+  public async normalizeCases(): Promise<number> {
+    if (!this.license?.canWrite || !this.hasFeature('cases') || ['admin', 'manager', 'support'].indexOf(this.role) < 0) { return 0; }
+    await this.ensure(['cases']);
+    let n = 0;
+    for (const c of this.data.cases || []) {
+      const open = c.caseStatus !== 'Resolved' && c.caseStatus !== 'Closed';
+      const resume = !!c.slaPausedAt && c.caseStatus !== 'Waiting on customer';
+      if (!c.caseNumber || (open && (!c.slaDue || resume || (!c.firstResponseDue && !c.firstRespondedAt)))) {
+        await this.patch('cases', c.id!, {});
+        n++;
+      }
+    }
+    return n;
+  }
+
+  // ------------------------------------------------------------------ e-signature
+
+  public signingLink(q: IRecord): string {
+    const base = (this.settings.quote.signingUrl || '').trim();
+    if (!base || !q.signatureToken) { return ''; }
+    return `${base}${base.indexOf('?') >= 0 ? '&' : '?'}q=${q.id}&t=${encodeURIComponent(q.signatureToken)}`;
+  }
+
+  /** Issues a new single-use signing link for the quote (any earlier link stops working). */
+  public async sendForSignature(q: IRecord, email: string): Promise<{ quote: IRecord; link: string }> {
+    if (!/^https:\/\//i.test(this.settings.quote.signingUrl || '')) {
+      throw new Error('Set the e-signature link in Settings › Company › Quotes first (the HTTP URL of the flow “Quote e-signature”).');
+    }
+    if (!this.quoteApproval(q).approved) { throw new Error('This quote needs discount approval before it can be sent for signature.'); }
+    const bytes = new Uint8Array(24);
+    window.crypto.getRandomValues(bytes);
+    const token = Array.prototype.map.call(bytes, (b: number) => ('0' + b.toString(16)).slice(-2)).join('');
+    const quote = await this.patch('quotes', q.id!, {
+      signatureToken: token, signatureStatus: 'Sent', signatureEmail: email.trim().toLowerCase(), signatureNote: '',
+      ...(q.quoteStatus === 'Draft' || !q.quoteStatus ? { quoteStatus: 'Sent' } : {})
+    });
+    await this.logActivity('quotes', q.id!, 'Sent for e-signature', `To: ${email}`);
+    return { quote, link: this.signingLink(quote) };
+  }
+
+  /**
+   * Completes quotes the customer signed on the signing page (the flow only records the signature):
+   * closes the opportunity as won, makes the account a customer, creates subscriptions. Runs on open.
+   */
+  public async processSignedQuotes(): Promise<number> {
+    if (!this.can('edit', 'quotes')) { return 0; }
+    await this.ensure(['quotes']);
+    const todo = (this.data.quotes || []).filter(q => (q.signatureStatus === 'Signed' || q.signatureStatus === 'Declined') && !q.signatureProcessed);
+    for (const q of todo) {
+      await this.patch('quotes', q.id!, { signatureProcessed: true });
+      if (q.signatureStatus === 'Declined') {
+        this.webhooks.emit('quote.declined', { id: q.id, quoteNumber: q.quoteNumber }, `Quote declined: ${q.quoteNumber}`);
+        continue;
+      }
+      await this.acceptQuote(q, !!q.opportunityRef && this.settings.quote.signatureClosesOpportunity);
+      if (this.settings.invoice.createSubscriptionsOnAccept && this.can('create', 'subscriptions') && !(this.data.subscriptions || []).some(x => x.quoteRef === q.id)) {
+        await this.ensure(['subscriptions']);
+        if (!(this.data.subscriptions || []).some(x => x.quoteRef === q.id)) { await this.createSubscriptionsFromQuote(q); }
+      }
+      this.webhooks.emit('quote.signed', { id: q.id, quoteNumber: q.quoteNumber, signedBy: q.signatureName, signedDate: q.signedDate, total: q.grandTotal },
+        `✍ Quote signed: ${q.quoteNumber} by ${q.signatureName} (${q.grandTotal} ${this.settings.currency})`);
+    }
+    return todo.length;
+  }
+
   /** Discount as % of subtotal and whether it needs manager approval (Settings › Company › Quotes). */
   public quoteApproval(q: IRecord): { discountPct: number; required: boolean; approved: boolean } {
     const t = quoteTotals(q.lineItems || []);
@@ -509,6 +793,10 @@ export class Engine {
     await this.graph.sendMail([to], subject, body, cc);
     if (related) {
       await this.logActivity(related.key, related.id, `Email: ${subject}`, `To: ${to}\n\n${body}`, 'Email');
+      const c = related.key === 'cases' ? this.find('cases', related.id) : undefined;
+      if (c && !c.firstRespondedAt) {
+        await this.patch('cases', c.id!, { firstRespondedAt: new Date().toISOString(), ...(c.caseStatus === 'New' ? { caseStatus: 'In progress' } : {}) });
+      }
     }
   }
 
@@ -527,7 +815,7 @@ export class Engine {
 
   public fillTemplate(text: string, r: IRecord): string {
     const vars: Record<string, string> = {
-      firstName: r.firstName || String(r.contactName || r.title || '').split(' ')[0] || '',
+      firstName: r.firstName || (r.contactRef ? this.find('contacts', r.contactRef)?.firstName : '') || String(r.contactName || (r.contactRef ? '' : r.title) || '').split(' ')[0] || '',
       lastName: r.lastName || '',
       fullName: r.title || r.contactName || '',
       company: r.company || this.display('accounts', r.accountRef) || '',
@@ -537,7 +825,10 @@ export class Engine {
       scheduledDate: r.scheduledDate ? new Date(r.scheduledDate).toLocaleString() : '',
       meetingLink: r.meetingLink || '',
       quoteNumber: r.quoteNumber || '',
-      total: r.grandTotal !== undefined ? String(r.grandTotal) : '',
+      invoiceNumber: r.invoiceNumber || '',
+      paymentLink: r.paymentLink || '',
+      caseNumber: r.caseNumber || '',
+      total: r.grandTotal !== undefined ? fmtMoney(Math.max(0, r.grandTotal - (Number(r.amountPaid) || 0)), this.settings.currency || 'USD') : '',
       companyName: this.settings.company.name || ''
     };
     return text.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, k) => (k in vars ? vars[k] : ''));
