@@ -2,7 +2,7 @@ import * as React from 'react';
 import {
   CommandBar, ICommandBarItemProps, SearchBox, Dropdown, Stack, Text, IColumn, Selection, SelectionMode, ShimmeredDetailsList,
   DetailsListLayoutMode, MessageBarType, Dialog, DialogType, DialogFooter, PrimaryButton, DefaultButton, Checkbox, TextField,
-  IContextualMenuItem, ConstrainMode
+  IContextualMenuItem, Link
 } from '@fluentui/react';
 import { EntityKey, IFieldDef, IRecord, LOST, WON } from '../../models/model';
 import { useCrm, useEntities } from '../CrmContext';
@@ -16,7 +16,7 @@ const ALL = '__all';
 
 export const EntityGrid: React.FC<{ entity: EntityKey; title?: string; initialFilters?: Record<string, string>; defaultMode?: 'list' | 'board' }> =
   ({ entity, initialFilters = {}, defaultMode }) => {
-    const { engine, open, notify, currency, settings, isNarrow } = useCrm();
+    const { engine, open, notify, currency, settings, isNarrow, width } = useCrm();
     const def = engine.def(entity);
     const { loading, rows } = useEntities(entity, ...(def.fields.filter(f => f.type === 'lookup').map(f => f.lookup!) as EntityKey[]));
     const viewsKey = `brillienta-crm:views:${entity}`;
@@ -25,7 +25,8 @@ export const EntityGrid: React.FC<{ entity: EntityKey; title?: string; initialFi
     const [filters, setFilters] = React.useState<Record<string, string>>(initialFilters);
     const [sortKey, setSortKey] = React.useState<string>(entity === 'leads' ? 'created' : 'modified');
     const [desc, setDesc] = React.useState(true);
-    const [mode, setMode] = React.useState<'list' | 'board'>(defaultMode || (isNarrow ? 'list' : 'list'));
+    const [mode, setMode] = React.useState<'list' | 'board'>(defaultMode || 'list');
+    const [showFilters, setShowFilters] = React.useState(false);
     const [views, setViews] = React.useState<IView[]>(() => lsGet<IView[]>(viewsKey, []));
     const [visibleCols, setVisibleCols] = React.useState<string[]>(() => lsGet<string[]>(colsKey, def.fields.filter(f => f.grid).map(f => f.key)));
     const [selected, setSelected] = React.useState<IRecord[]>([]);
@@ -39,6 +40,7 @@ export const EntityGrid: React.FC<{ entity: EntityKey; title?: string; initialFi
     }, []);
 
     const filterFields = def.fields.filter(f => f.filter);
+    const activeFilters = Object.keys(filters).filter(k => k !== '__open' && filters[k] && filters[k] !== ALL).length;
     const all = rows(entity);
     const filtered = sortBy(all.filter(r => {
       for (const k of Object.keys(filters)) {
@@ -74,16 +76,22 @@ export const EntityGrid: React.FC<{ entity: EntityKey; title?: string; initialFi
 
     const sortableValue = (fd: IFieldDef): string => fd.key;
     const columns: IColumn[] = def.fields.filter(f => visibleCols.indexOf(f.key) >= 0 || f.key === 'title').map((f): IColumn => ({
-      key: f.key, name: f.label, fieldName: sortableValue(f), minWidth: f.key === 'title' ? 160 : (f.type === 'choice' ? 90 : 100), maxWidth: f.key === 'title' ? 280 : 200,
+      key: f.key, name: f.label, fieldName: sortableValue(f),
+      minWidth: f.key === 'title' ? 150 : f.type === 'number' || f.type === 'percent' ? 48 : f.type === 'choice' ? 104 : f.type === 'datetime' ? 118 : f.type === 'date' ? 90 : 90,
+      maxWidth: f.key === 'title' ? 260 : f.type === 'number' || f.type === 'percent' ? 70 : 180,
       isResizable: true, isSorted: sortKey === f.key, isSortedDescending: desc,
       onColumnClick: () => { if (sortKey === f.key) { setDesc(!desc); } else { setSortKey(f.key); setDesc(false); } },
       onRender: (r: IRecord) => f.key === 'title'
         ? <span className="crm-link-cell">{r.title || r.quoteNumber || `#${r.id}`}</span>
-        : renderValue(f, r, engine, currency)
+        : renderValue(f, r, engine, currency, true)
     }));
     // title first
     columns.sort((a, b) => (a.key === 'title' ? -1 : b.key === 'title' ? 1 : 0));
-    columns.push({ key: 'modified', name: 'Modified', fieldName: 'modified', minWidth: 90, isSorted: sortKey === 'modified', isSortedDescending: desc,
+    // Tablet widths: show only as many columns as fit (the rest stay available in the record and the column chooser).
+    const contentWidth = width - (width < 1100 ? 120 : 280);
+    const maxCols = Math.max(3, Math.floor(contentWidth / 115));
+    if (columns.length > maxCols) { columns.splice(maxCols); }
+    if (columns.length <= 7 && width >= 1100) columns.push({ key: 'modified', name: 'Modified', fieldName: 'modified', minWidth: 90, isSorted: sortKey === 'modified', isSortedDescending: desc,
       onColumnClick: () => { if (sortKey === 'modified') { setDesc(!desc); } else { setSortKey('modified'); setDesc(true); } },
       onRender: (r: IRecord) => (r.modified ? new Date(r.modified).toLocaleDateString() : '') });
 
@@ -168,7 +176,9 @@ export const EntityGrid: React.FC<{ entity: EntityKey; title?: string; initialFi
       if (!boardField) { return null; }
       const lanes = choicesFor(boardField, settings);
       const extra = filtered.filter(r => lanes.indexOf(r[boardField.key]) < 0 && r[boardField.key]).map(r => r[boardField.key]);
-      const allLanes = [...lanes, ...extra.filter((x, i) => extra.indexOf(x) === i)];
+      const closed: Record<string, string[]> = { opportunities: [WON, LOST], leads: ['Converted', 'Unqualified'], cases: ['Resolved', 'Closed'], demos: ['Completed', 'No-show', 'Cancelled'] };
+      const hide = filters.__open === 'open' ? (closed[entity] || []) : [];
+      const allLanes = [...lanes, ...extra.filter((x, i) => extra.indexOf(x) === i)].filter(l => hide.indexOf(l) < 0);
       const drop = (lane: string): void => {
         setOver(undefined);
         const id = dragId;
@@ -199,7 +209,7 @@ export const EntityGrid: React.FC<{ entity: EntityKey; title?: string; initialFi
                     onDragStart={e => { e.dataTransfer.setData('text/plain', String(r.id)); setDragId(r.id); }} onDragEnd={() => setDragId(undefined)}
                     onClick={() => open(entity, r)} onKeyDown={e => { if (e.key === 'Enter') { open(entity, r); } }}>
                     <Text block styles={{ root: { fontWeight: 600 } }}>{r.title || r.quoteNumber || r.caseNumber}</Text>
-                    {cardFields.map(f => { const v = renderValue(f, r, engine, currency); return v ? <div key={f.key} className="crm-card-line">{v}</div> : null; })}
+                    {cardFields.map(f => { const v = renderValue(f, r, engine, currency, true); return v ? <div key={f.key} className="crm-card-line">{v}</div> : null; })}
                   </div>
                 ))}
                 {!cards.length && <Text variant="small" className="crm-muted" style={{ padding: 8 }}>{engine.can('edit', entity) ? 'Drop here' : 'Empty'}</Text>}
@@ -213,34 +223,58 @@ export const EntityGrid: React.FC<{ entity: EntityKey; title?: string; initialFi
     return (
       <Stack tokens={{ childrenGap: 8 }}>
         <CommandBar items={items} farItems={far} styles={{ root: { padding: 0 } }} />
-        <Stack horizontal wrap tokens={{ childrenGap: 8 }} verticalAlign="end">
-          <SearchBox placeholder={`Search ${def.plural.toLowerCase()}...`} value={q} onChange={(_, v) => setQ(v || '')} styles={{ root: { width: isNarrow ? '100%' : 240 } }} />
+        <div className="crm-filterbar">
+          <SearchBox placeholder={`Search ${def.plural.toLowerCase()}...`} value={q} onChange={(_, v) => setQ(v || '')} className="crm-filter-search" />
           {['opportunities', 'leads', 'cases', 'activities', 'demos'].indexOf(entity) >= 0 && (
             <Dropdown ariaLabel="Open or all" selectedKey={filters.__open || ALL} styles={{ root: { width: 120 } }}
               options={[{ key: ALL, text: 'All' }, { key: 'open', text: 'Open only' }]} onChange={(_, o) => setFilters({ ...filters, __open: String(o?.key) })} />
           )}
-          {filterFields.map(f => {
-            let opts: { key: string; text: string }[];
-            if (f.type === 'user') { opts = [{ key: 'me', text: `My ${def.plural.toLowerCase()}` }, { key: 'none', text: 'Unassigned' }]; }
-            else if (f.type === 'boolean') { opts = [{ key: 'yes', text: 'Yes' }, { key: 'no', text: 'No' }]; }
-            else {
-              const distinct = all.map(r => String(r[f.key] || '')).filter((v, i, a) => v && a.indexOf(v) === i);
-              const base = f.type === 'choice' ? choicesFor(f, settings) : [];
-              opts = [...base, ...distinct.filter(d => base.indexOf(d) < 0)].map(v => ({ key: v, text: v }));
-            }
-            return (
-              <Dropdown key={f.key} ariaLabel={f.label} placeholder={f.label} selectedKey={filters[f.key] || ALL} styles={{ root: { width: 150 } }}
-                options={[{ key: ALL, text: `${f.label}: all` }, ...opts]} onChange={(_, o) => setFilters({ ...filters, [f.key]: String(o?.key) })} />
-            );
-          })}
-        </Stack>
-        <Text variant="small" className="crm-muted">
-          {filtered.length} of {all.length} {def.plural.toLowerCase()}
-          {moneyField && filtered.length > 0 && <> · {moneyField.label} total {fmtMoney(sum(filtered, r => Number(r[moneyField.key]) || 0), currency)}</>}
-          {sel > 0 && <> · {sel} selected</>}
-        </Text>
+          {filterFields.length > 0 && (
+            <DefaultButton iconProps={{ iconName: 'Filter' }} text={activeFilters ? `Filters (${activeFilters})` : 'Filters'} checked={showFilters}
+              primary={activeFilters > 0 && !showFilters} onClick={() => setShowFilters(!showFilters)} ariaLabel="Show filters" />
+          )}
+          {(activeFilters > 0 || q) && <Link onClick={() => { setQ(''); setFilters(filters.__open ? { __open: filters.__open } : {}); }}>Clear</Link>}
+          <Text variant="small" className="crm-muted crm-filter-count">
+            {filtered.length} of {all.length}
+            {moneyField && filtered.length > 0 && <> · {moneyField.label === 'Total' ? 'Total value' : `Total ${moneyField.label.toLowerCase()}`} {fmtMoney(sum(filtered, r => Number(r[moneyField.key]) || 0), currency)}</>}
+            {sel > 0 && <> · {sel} selected</>}
+          </Text>
+        </div>
+        {showFilters && filterFields.length > 0 && (
+          <div className="crm-filter-panel">
+            {filterFields.map(f => {
+              let opts: { key: string; text: string }[];
+              if (f.type === 'user') { opts = [{ key: 'me', text: `Mine` }, { key: 'none', text: 'Unassigned' }]; }
+              else if (f.type === 'boolean') { opts = [{ key: 'yes', text: 'Yes' }, { key: 'no', text: 'No' }]; }
+              else {
+                const distinct = all.map(r => String(r[f.key] || '')).filter((v, i, a) => v && a.indexOf(v) === i);
+                const base = f.type === 'choice' ? choicesFor(f, settings) : [];
+                opts = [...base, ...distinct.filter(d => base.indexOf(d) < 0)].map(v => ({ key: v, text: v }));
+              }
+              return (
+                <Dropdown key={f.key} label={f.label} selectedKey={filters[f.key] || ALL}
+                  options={[{ key: ALL, text: 'All' }, ...opts]} onChange={(_, o) => setFilters({ ...filters, [f.key]: String(o?.key) })} />
+              );
+            })}
+          </div>
+        )}
 
-        {mode === 'board' && def.boardField ? board() : (
+        {mode === 'board' && def.boardField ? board() : isNarrow ? (
+          <div className="crm-mlist" role="list" aria-label={def.plural}>
+            {loading && !all.length && <Text className="crm-muted">Loading…</Text>}
+            {filtered.slice(0, 300).map(r => {
+              const extras = def.fields.filter(f => f.grid && f.key !== 'title' && f.type !== 'tags' && f.type !== 'email').slice(0, 4);
+              return (
+                <div key={r.id} className="crm-mlist-item" role="listitem" tabIndex={0} onClick={() => open(entity, r)} onKeyDown={e => { if (e.key === 'Enter') { open(entity, r); } }}>
+                  <Text block styles={{ root: { fontWeight: 600 } }}>{r.title || r.quoteNumber || r.caseNumber || `#${r.id}`}</Text>
+                  <div className="crm-mlist-meta">
+                    {extras.map(f => { const v = renderValue(f, r, engine, currency, true); return v ? <span key={f.key}>{v}</span> : null; })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
           <ShimmeredDetailsList
             enableShimmer={loading && !all.length}
             items={filtered}
@@ -248,10 +282,13 @@ export const EntityGrid: React.FC<{ entity: EntityKey; title?: string; initialFi
             selection={selection}
             selectionMode={engine.can('edit', entity) ? SelectionMode.multiple : SelectionMode.none}
             layoutMode={DetailsListLayoutMode.justified}
-            constrainMode={ConstrainMode.unconstrained}
+            isSelectedOnFocus={false}
             onItemInvoked={(r: IRecord) => open(entity, r)}
             onRenderRow={(props, render) => props && render ? (
-              <div onClick={e => { if (!(e.target as HTMLElement).closest('[data-selection-toggle],a,button,.ms-Check')) { open(entity, props.item); } }} style={{ cursor: 'pointer' }}>
+              // A click on a row opens the record; selection only via the checkbox.
+              <div className="crm-row"
+                onMouseDownCapture={e => { if (!(e.target as HTMLElement).closest('[data-selection-toggle],.ms-Check,a,button,input')) { e.stopPropagation(); } }}
+                onClickCapture={e => { if (!(e.target as HTMLElement).closest('[data-selection-toggle],.ms-Check,a,button,input')) { e.stopPropagation(); e.preventDefault(); open(entity, props.item); } }}>
                 {render(props)}
               </div>
             ) : null}

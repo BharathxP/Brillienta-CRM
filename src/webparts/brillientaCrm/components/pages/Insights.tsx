@@ -239,13 +239,13 @@ export const ReportsPage: React.FC = () => {
       <div className="crm-dash-grid">
         <Card title="Sales leaderboard" wide>
           <DetailsList items={board} selectionMode={SelectionMode.none} layoutMode={DetailsListLayoutMode.justified} columns={[
-            { key: 'o', name: 'Owner', fieldName: 'owner', minWidth: 140 },
-            { key: 'w', name: 'Won', fieldName: 'won', minWidth: 100, onRender: x => <b>{money(x.won)}</b> },
-            { key: 'd', name: 'Deals won', fieldName: 'deals', minWidth: 70 },
-            { key: 'l', name: 'Lost', fieldName: 'lost', minWidth: 50 },
-            { key: 'wr', name: 'Win rate', minWidth: 70, onRender: x => (x.deals + x.lost ? `${Math.round((x.deals / (x.deals + x.lost)) * 100)}%` : '—') },
-            { key: 'p', name: 'Open pipeline', fieldName: 'pipeline', minWidth: 100, onRender: x => money(x.pipeline) },
-            { key: 'a', name: 'Activities', fieldName: 'activities', minWidth: 70 }
+            { key: 'o', name: 'Owner', fieldName: 'owner', minWidth: 90, maxWidth: 160 },
+            { key: 'w', name: 'Won', fieldName: 'won', minWidth: 70, maxWidth: 110, onRender: x => <b>{money(x.won)}</b> },
+            { key: 'd', name: 'Deals', fieldName: 'deals', minWidth: 40, maxWidth: 60 },
+            { key: 'l', name: 'Lost', fieldName: 'lost', minWidth: 36, maxWidth: 50 },
+            { key: 'wr', name: 'Win %', minWidth: 44, maxWidth: 60, onRender: x => (x.deals + x.lost ? `${Math.round((x.deals / (x.deals + x.lost)) * 100)}%` : '—') },
+            { key: 'p', name: 'Pipeline', fieldName: 'pipeline', minWidth: 70, maxWidth: 110, onRender: x => money(x.pipeline) },
+            { key: 'a', name: 'Activities', fieldName: 'activities', minWidth: 70, maxWidth: 90 }
           ]} />
         </Card>
         <Card title="Win / loss reasons"><Donut data={groupCount(lost, o => o.lostReason || 'Not given')} ariaLabel="Lost reasons" centerLabel="lost deals" /></Card>
@@ -261,7 +261,7 @@ export const ReportsPage: React.FC = () => {
           <DetailsList items={sources} selectionMode={SelectionMode.none} layoutMode={DetailsListLayoutMode.justified} columns={[
             { key: 's', name: 'Source', fieldName: 'source', minWidth: 140 },
             { key: 'l', name: 'Leads', fieldName: 'leads', minWidth: 60 },
-            { key: 'c', name: 'Converted', fieldName: 'converted', minWidth: 70 },
+            { key: 'c', name: 'Converted', fieldName: 'converted', minWidth: 76 },
             { key: 'r', name: 'Conv. rate', minWidth: 70, onRender: x => `${x.leads ? Math.round((x.converted / x.leads) * 100) : 0}%` },
             { key: 'v', name: 'Revenue won', fieldName: 'revenue', minWidth: 100, onRender: x => money(x.revenue) }
           ]} />

@@ -189,3 +189,13 @@ export function groupCount<T>(items: T[], fn: (x: T) => string): { label: string
   items.forEach(x => { const k = fn(x) || '(none)'; m[k] = (m[k] || 0) + 1; });
   return Object.keys(m).map(label => ({ label, value: m[label] })).sort((a, b) => b.value - a.value);
 }
+
+/** Compact date for tables and cards: "18 Nov 10:00" (year only when not this year). */
+export function fmtShort(v?: string, withTime: boolean = true): string {
+  if (!v) { return ''; }
+  const d = new Date(v);
+  if (isNaN(d.getTime())) { return ''; }
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  const date = d.toLocaleDateString(undefined, sameYear ? { day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short', year: 'numeric' });
+  return withTime ? `${date} ${d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}` : date;
+}

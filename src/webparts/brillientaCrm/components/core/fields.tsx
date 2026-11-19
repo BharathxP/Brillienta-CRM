@@ -1,12 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import * as React from 'react';
-import { Checkbox, Dropdown, Link, SpinButton, TagPicker, TextField, ITag, Label, Icon } from '@fluentui/react';
+import { Checkbox, Dropdown, Link, SpinButton, TagPicker, TextField, ITag, Label, Icon, Position } from '@fluentui/react';
 import { IFieldDef, IRecord } from '../../models/model';
 import { ICrmSettings } from '../../models/settings';
 import { Engine } from '../../services/Engine';
 import { useCrm } from '../CrmContext';
 import { DateTimeField, LookupPicker, Pill, ScoreBadge, UserPicker } from './controls';
-import { fmtDate, fmtMoney, isOverdue } from '../utils';
+import { fmtDate, fmtMoney, fmtShort, isOverdue } from '../utils';
 
 export function choicesFor(fd: IFieldDef, s: ICrmSettings, current?: string): string[] {
   let list: string[] = fd.choices || [];
@@ -23,7 +23,7 @@ export function choicesFor(fd: IFieldDef, s: ICrmSettings, current?: string): st
 const safeUrl = (v: string): string | undefined => (/^https?:\/\//i.test(v) ? v : (/^[\w.-]+\.[a-z]{2,}/i.test(v) ? `https://${v}` : undefined));
 
 /** Read-only rendering of a field value (grids, cards, read-only forms). */
-export function renderValue(fd: IFieldDef, r: IRecord, engine: Engine, currency: string): React.ReactNode {
+export function renderValue(fd: IFieldDef, r: IRecord, engine: Engine, currency: string, compact: boolean = false): React.ReactNode {
   const v = r[fd.key];
   if (v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length)) {
     return fd.type === 'boolean' ? 'No' : '';
@@ -32,11 +32,11 @@ export function renderValue(fd: IFieldDef, r: IRecord, engine: Engine, currency:
     case 'currency': return fmtMoney(Number(v), currency);
     case 'percent': return `${v}%`;
     case 'number': return fd.key === 'leadScore' ? <ScoreBadge score={Number(v)} /> : Number(v).toLocaleString();
-    case 'date': return fmtDate(v);
+    case 'date': return compact ? fmtShort(v, false) : fmtDate(v);
     case 'datetime': {
       const overdue = (fd.key === 'nextFollowUp' || fd.key === 'slaDue' || fd.key === 'dueDate') && isOverdue(v) &&
         !(r.completed || r.caseStatus === 'Resolved' || r.caseStatus === 'Closed' || r.status === 'Converted');
-      return <span style={overdue ? { color: '#a4262c', fontWeight: 600 } : undefined}>{fmtDate(v, true)}</span>;
+      return <span style={overdue ? { color: 'var(--bad)', fontWeight: 600 } : undefined} title={fmtDate(v, true)}>{compact ? fmtShort(v) : fmtDate(v, true)}</span>;
     }
     case 'boolean': return v ? 'Yes' : 'No';
     case 'user': return v.title;
@@ -98,7 +98,7 @@ export const FieldEditor: React.FC<{ fd: IFieldDef; value: any; onChange: (v: an
         return <TextField label={`${fd.label} (${settings.currency})`} type="number" min={0} step="0.01" value={value === undefined || value === null ? '' : String(value)} disabled={ro}
           required={fd.required} errorMessage={error} onChange={(_, v) => onChange(v === '' || v === undefined ? undefined : Number(v))} />;
       case 'percent':
-        return <SpinButton label={`${fd.label} (%)`} min={0} max={100} step={5} value={String(value ?? 0)} disabled={ro}
+        return <SpinButton label={`${fd.label} (%)`} labelPosition={Position.top} min={0} max={100} step={5} value={String(value ?? 0)} disabled={ro}
           onChange={(_, v) => onChange(Math.max(0, Math.min(100, Number(v) || 0)))} styles={{ label: { fontWeight: 600 } }} />;
       case 'date':
         return <DateTimeField label={fd.label} value={value} showTime={false} required={fd.required} disabled={ro} onChange={onChange} />;

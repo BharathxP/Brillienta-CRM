@@ -260,9 +260,11 @@ export const RecordPanel: React.FC<IProps> = ({ entity, record, onClose, canGoBa
       onRenderFooterContent={() => (
         <Stack horizontal tokens={{ childrenGap: 8 }}>
           {canEdit && <PrimaryButton text={isNew ? 'Create' : 'Save'} disabled={busy || (!dirty && !isNew)} onClick={() => save(false)} />}
-          {canEdit && <DefaultButton text={isNew ? 'Create & close' : 'Save & close'} disabled={busy || (!dirty && !isNew)} onClick={() => save(true)} />}
+          {canEdit && !isNarrow && <DefaultButton text={isNew ? 'Create & close' : 'Save & close'} disabled={busy || (!dirty && !isNew)} onClick={() => save(true)} />}
           <DefaultButton text={canEdit ? 'Cancel' : 'Close'} onClick={close} />
-          {!isNew && engine.can('delete', entity) && <DefaultButton text="Delete" iconProps={{ iconName: 'Delete' }} style={{ marginLeft: 'auto' }} onClick={() => setConfirmDelete(true)} />}
+          {!isNew && engine.can('delete', entity) && (isNarrow
+            ? <IconButton iconProps={{ iconName: 'Delete' }} title="Delete" ariaLabel="Delete" style={{ marginLeft: 'auto' }} onClick={() => setConfirmDelete(true)} />
+            : <DefaultButton text="Delete" iconProps={{ iconName: 'Delete' }} style={{ marginLeft: 'auto' }} onClick={() => setConfirmDelete(true)} />)}
         </Stack>
       )}
     >

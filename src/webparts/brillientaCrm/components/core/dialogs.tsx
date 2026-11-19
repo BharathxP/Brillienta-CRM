@@ -2,7 +2,7 @@
 import * as React from 'react';
 import {
   Checkbox, DefaultButton, Dialog, DialogFooter, DialogType, Dropdown, MessageBar, MessageBarType, PrimaryButton,
-  ProgressIndicator, SpinButton, Stack, Text, TextField, ChoiceGroup, Link
+  ProgressIndicator, SpinButton, Stack, Text, TextField, ChoiceGroup, Link, Position
 } from '@fluentui/react';
 import { EntityKey, IRecord } from '../../models/model';
 import { useCrm } from '../CrmContext';
@@ -162,7 +162,7 @@ export const MeetingDialog: React.FC<{ demo: IRecord; onClose: () => void }> = (
         {error && <MessageBar messageBarType={MessageBarType.error} isMultiline>{error}</MessageBar>}
         <TextField label="Subject" value={subject} onChange={(_, v) => setSubject(v || '')} />
         <DateTimeField label="Start" value={start} onChange={setStart} required />
-        <SpinButton label="Duration (minutes)" min={15} max={240} step={15} value={String(minutes)} onChange={(_, v) => setMinutes(Number(v) || 30)} />
+        <SpinButton label="Duration (minutes)" labelPosition={Position.top} min={15} max={240} step={15} value={String(minutes)} onChange={(_, v) => setMinutes(Number(v) || 30)} />
         <TextField label="Attendees" value={attendees} onChange={(_, v) => setAttendees(v || '')} placeholder="email; email" />
         <TextField label="Agenda" multiline rows={6} value={agenda} onChange={(_, v) => setAgenda(v || '')} />
       </Stack>

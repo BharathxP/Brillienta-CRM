@@ -248,29 +248,37 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
           <div className="crm-dash-grid" style={{ paddingTop: 12 }}>
             <Card title="Pipeline stages" wide>
               <Text variant="small" className="crm-muted" block>Order matters. “Closed Won” and “Closed Lost” must exist. Probability and forecast category are applied automatically when a deal changes stage.</Text>
-              {s.stages.map((st, i) => {
-                const fixed = st.name === 'Closed Won' || st.name === 'Closed Lost';
-                return (
-                  <Stack key={i} horizontal verticalAlign="end" wrap tokens={{ childrenGap: 8 }} style={{ marginTop: 6 }}>
-                    <TextField label={i === 0 ? 'Stage' : undefined} value={st.name} disabled={fixed} onChange={(_, v) => setStage(i, { name: v || '' })} styles={{ root: { width: 200 } }} />
-                    <TextField label={i === 0 ? 'Probability %' : undefined} type="number" value={String(st.probability)} disabled={fixed} onChange={(_, v) => setStage(i, { probability: Number(v) || 0 })} styles={{ root: { width: 110 } }} />
-                    <Dropdown label={i === 0 ? 'Forecast' : undefined} selectedKey={st.forecast} disabled={fixed} options={['Pipeline', 'Best case', 'Commit', 'Closed', 'Omitted'].map(x => ({ key: x, text: x }))}
-                      onChange={(_, o) => setStage(i, { forecast: String(o?.key) })} styles={{ root: { width: 130 } }} />
-                    <IconButton iconProps={{ iconName: 'Up' }} ariaLabel="Move up" onClick={() => moveStage(i, -1)} />
-                    <IconButton iconProps={{ iconName: 'Down' }} ariaLabel="Move down" onClick={() => moveStage(i, 1)} />
-                    {!fixed && <IconButton iconProps={{ iconName: 'Delete' }} ariaLabel="Remove stage" onClick={() => upd({ stages: s.stages.filter((_, j) => j !== i) })} />}
-                  </Stack>
-                );
-              })}
+              <div className="crm-stage-table" role="table" aria-label="Pipeline stages">
+                <span className="crm-stage-head" role="columnheader">Stage</span>
+                <span className="crm-stage-head" role="columnheader">Probability %</span>
+                <span className="crm-stage-head crm-stage-head-forecast" role="columnheader">Forecast</span>
+                <span />
+                {s.stages.map((st, i) => {
+                  const fixed = st.name === 'Closed Won' || st.name === 'Closed Lost';
+                  return (
+                    <React.Fragment key={i}>
+                      <TextField ariaLabel="Stage name" value={st.name} disabled={fixed} onChange={(_, v) => setStage(i, { name: v || '' })} />
+                      <TextField ariaLabel="Probability %" type="number" value={String(st.probability)} disabled={fixed} onChange={(_, v) => setStage(i, { probability: Number(v) || 0 })} />
+                      <Dropdown className="crm-stage-forecast" ariaLabel="Forecast category" selectedKey={st.forecast} disabled={fixed} options={['Pipeline', 'Best case', 'Commit', 'Closed', 'Omitted'].map(x => ({ key: x, text: x }))}
+                        onChange={(_, o) => setStage(i, { forecast: String(o?.key) })} />
+                      <Stack horizontal>
+                        <IconButton iconProps={{ iconName: 'Up' }} ariaLabel="Move up" disabled={i === 0} onClick={() => moveStage(i, -1)} />
+                        <IconButton iconProps={{ iconName: 'Down' }} ariaLabel="Move down" disabled={i === s.stages.length - 1} onClick={() => moveStage(i, 1)} />
+                        <IconButton iconProps={{ iconName: 'Delete' }} ariaLabel="Remove stage" disabled={fixed} style={fixed ? { visibility: 'hidden' } : undefined} onClick={() => upd({ stages: s.stages.filter((_, j) => j !== i) })} />
+                      </Stack>
+                    </React.Fragment>
+                  );
+                })}
+              </div>
               <DefaultButton iconProps={{ iconName: 'Add' }} text="Add stage" style={{ marginTop: 8 }}
                 onClick={() => upd({ stages: [...s.stages.slice(0, -2), { name: 'New stage', probability: 50, forecast: 'Pipeline' }, ...s.stages.slice(-2)] })} />
             </Card>
             <Card title="Pick lists (one per line)">
               <Stack tokens={{ childrenGap: 8 }}>
-                <TextField label="Lead sources" multiline rows={5} value={lines(s.leadSources)} onChange={(_, v) => upd({ leadSources: parseLines(v || '') })} />
-                <TextField label="Industries" multiline rows={5} value={lines(s.industries)} onChange={(_, v) => upd({ industries: parseLines(v || '') })} />
-                <TextField label="Lost reasons" multiline rows={4} value={lines(s.lostReasons)} onChange={(_, v) => upd({ lostReasons: parseLines(v || '') })} />
-                <TextField label="Case categories" multiline rows={4} value={lines(s.caseCategories)} onChange={(_, v) => upd({ caseCategories: parseLines(v || '') })} />
+                <TextField label="Lead sources" multiline autoAdjustHeight rows={5} value={lines(s.leadSources)} onChange={(_, v) => upd({ leadSources: parseLines(v || '') })} />
+                <TextField label="Industries" multiline autoAdjustHeight rows={5} value={lines(s.industries)} onChange={(_, v) => upd({ industries: parseLines(v || '') })} />
+                <TextField label="Lost reasons" multiline autoAdjustHeight rows={4} value={lines(s.lostReasons)} onChange={(_, v) => upd({ lostReasons: parseLines(v || '') })} />
+                <TextField label="Case categories" multiline autoAdjustHeight rows={4} value={lines(s.caseCategories)} onChange={(_, v) => upd({ caseCategories: parseLines(v || '') })} />
               </Stack>
             </Card>
             <Card title="Quarterly sales quotas">

@@ -20,6 +20,8 @@ export interface ICrmContext {
   notify: (message: string, type?: MessageBarType) => void;
   updateSettings: (s: ICrmSettings) => Promise<void>;
   isNarrow: boolean;
+  /** Width of the CRM area in pixels (for responsive layouts). */
+  width: number;
 }
 
 export const CrmContext = React.createContext<ICrmContext | undefined>(undefined);

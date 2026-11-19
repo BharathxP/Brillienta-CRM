@@ -115,7 +115,7 @@ export const ENTITIES: IEntityDef[] = [
       title('Name', { readOnly: true, required: false }),
       f('firstName', 'First name', 'text', { section: 'General', required: true }),
       f('lastName', 'Last name', 'text', { section: 'General' }),
-      f('email', 'Email', 'email', { section: 'General', grid: true }),
+      f('email', 'Email', 'email', { section: 'General' }),
       f('phone', 'Phone', 'phone', { section: 'General' }),
       f('company', 'Company', 'text', { section: 'General', grid: true }),
       f('jobTitle', 'Job title', 'text', { section: 'General' }),

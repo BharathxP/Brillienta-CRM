@@ -142,10 +142,12 @@ const BrillientaCrm: React.FC<IBrillientaCrmProps> = props => {
   const [stack, setStack] = React.useState<IOpenRecord[]>([]);
   const [toasts, setToasts] = React.useState<IToast[]>([]);
   const [navOpen, setNavOpen] = React.useState(false);
-  const [collapsed, setCollapsed] = React.useState<boolean>(() => lsGet('brillienta-crm:nav-collapsed', false));
+  const [navPref, setNavPref] = React.useState<boolean | undefined>(() => lsGet<boolean | undefined>('brillienta-crm:nav-collapsed', undefined));
   const [width, setWidth] = React.useState(1200);
   const rootRef = React.useRef<HTMLDivElement>(null);
   const isNarrow = width < 760;
+  // Sidebar: the user's choice wins; otherwise icons-only on tablet widths.
+  const collapsed = navPref === undefined ? width < 1100 : navPref;
   const [fsPref, setFsPref] = React.useState<boolean | undefined>(() => lsGet<boolean | undefined>('brillienta-crm:fullscreen', undefined));
   const toggleFullScreen = (): void => { const next = !(fsPref === undefined ? props.fullScreen : fsPref); setFsPref(next); lsSet('brillienta-crm:fullscreen', next); };
   const layerHostId = React.useMemo(() => `crm-layers-${Math.random().toString(36).slice(2, 9)}`, []);
@@ -197,7 +199,7 @@ const BrillientaCrm: React.FC<IBrillientaCrmProps> = props => {
   };
 
   const ctx: ICrmContext = {
-    engine, data, settings, currency: settings.currency || 'USD', isNarrow, notify, updateSettings,
+    engine, data, settings, currency: settings.currency || 'USD', isNarrow, width, notify, updateSettings,
     open: (key: EntityKey, record: IRecord = {}) => setStack(s => [...s.slice(-4), { key, record }]),
     navigate: (p: string) => { setPage(p); setNavOpen(false); }
   };
@@ -344,7 +346,7 @@ const BrillientaCrm: React.FC<IBrillientaCrmProps> = props => {
               <div className="crm-brand">
                 {collapsed && <img src={props.isDarkTheme ? MARK_DARK : MARK} alt="Brillienta CRM" className="crm-brand-mark crm-brand-collapsed" />}
                 <IconButton iconProps={{ iconName: 'GlobalNavButton' }} ariaLabel={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-                  onClick={() => { setCollapsed(!collapsed); lsSet('brillienta-crm:nav-collapsed', !collapsed); }} />
+                  onClick={() => { setNavPref(!collapsed); lsSet('brillienta-crm:nav-collapsed', !collapsed); }} />
                 {collapsed ? null : brand}
               </div>
               {navList(collapsed)}
@@ -363,7 +365,7 @@ const BrillientaCrm: React.FC<IBrillientaCrmProps> = props => {
                   { title: 'Demos today', key: 'demos', rows: demosToday },
                   { title: 'New leads for you', key: 'leads', rows: newForMe }
                 ]} onSeen={() => lsSet('brillienta-crm:last-seen', new Date().toISOString())} />
-                {canFullScreen && (
+                {canFullScreen && !isNarrow && (
                   <IconButton iconProps={{ iconName: fullScreen ? 'BackToWindow' : 'FullScreen' }} title={fullScreen ? 'Exit full screen (show SharePoint)' : 'Full screen'}
                     ariaLabel={fullScreen ? 'Exit full screen' : 'Full screen'} onClick={toggleFullScreen} />
                 )}
