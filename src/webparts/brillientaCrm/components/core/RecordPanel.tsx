@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { newOf, tr } from '../../i18n';
 import * as React from 'react';
 import {
   Panel, PanelType, PrimaryButton, DefaultButton, Stack, Pivot, PivotItem, MessageBar, MessageBarType, Dialog, DialogFooter,
@@ -12,6 +13,7 @@ import { Pill, ScoreBadge } from './controls';
 import { ActivityTimeline } from './ActivityTimeline';
 import { CallDialog, CampaignEmailDialog, ConvertLeadDialog, EmailDialog, MeetingDialog, MergeDialog, WhatsAppDialog } from './dialogs';
 import { downloadBlob } from '../../services/FlowPackage';
+import { requestEnrichment } from '../../services/Enrichment';
 import { waRecipient } from '../../services/WhatsApp';
 import { QuoteLines, printQuote } from './QuoteLines';
 import { SmartSummary } from './SmartSummary';
@@ -28,7 +30,7 @@ const RelatedList: React.FC<{ entity: EntityKey; rows: IRecord[]; loaded: boolea
   const cols = def.fields.filter(f => f.grid && f.key !== 'title').slice(0, 3);
   return (
     <div style={{ paddingTop: 12 }}>
-      {onNew && <DefaultButton iconProps={{ iconName: 'Add' }} text={`New ${def.singular.toLowerCase()}`} onClick={onNew} style={{ marginBottom: 8 }} />}
+      {onNew && <DefaultButton iconProps={{ iconName: 'Add' }} text={newOf(def.singular)} onClick={onNew} style={{ marginBottom: 8 }} />}
       {!loaded && <Spinner size={SpinnerSize.small} />}
       {loaded && rows.length === 0 && <Text className="crm-muted" block>None yet.</Text>}
       {rows.map(r => (
@@ -50,6 +52,12 @@ interface IProps {
   canGoBack: boolean;
 }
 
+/** Translates command bar labels (and their sub-menus). */
+const trItems = (items: ICommandBarItemProps[]): ICommandBarItemProps[] => items.map(c => ({
+  ...c, text: c.text ? tr(c.text) : c.text,
+  ...(c.subMenuProps ? { subMenuProps: { ...c.subMenuProps, items: c.subMenuProps.items.map(i => ({ ...i, text: i.text ? tr(i.text) : i.text })) } } : {})
+}));
+
 export const RecordPanel: React.FC<IProps> = ({ entity, record, onClose, canGoBack }) => {
   const { engine, open, notify, currency, settings, data, isNarrow } = useCrm();
   const def = engine.def(entity);
@@ -59,7 +67,9 @@ export const RecordPanel: React.FC<IProps> = ({ entity, record, onClose, canGoBa
     if (!isNew) { return { ...live }; }
     const init: IRecord = {};
     def.fields.forEach(f => { if (f.defaultValue !== undefined) { init[f.key] = f.defaultValue; } });
-    if (def.fields.some(f => f.key === 'owner')) { init.owner = engine.me; }
+    // New leads stay unassigned when territory or round-robin routing is on, so the routing decides.
+    const routed = entity === 'leads' && (settings.assignment.autoAssignNewLeads || settings.teams.some(t => t.members.length && t.territories.length));
+    if (def.fields.some(f => f.key === 'owner') && !routed) { init.owner = engine.me; }
     if (entity === 'quotes' || entity === 'invoices') { init.lineItems = init.lineItems || []; }
     return { ...init, ...record };
   });
@@ -68,7 +78,7 @@ export const RecordPanel: React.FC<IProps> = ({ entity, record, onClose, canGoBa
   const [error, setError] = React.useState<string>();
   const [errors, setErrors] = React.useState<Record<string, string>>({});
   const [confirmDelete, setConfirmDelete] = React.useState(false);
-  const [dialog, setDialog] = React.useState<'convert' | 'email' | 'meeting' | 'lost' | 'emailQuote' | 'emailInvoice' | 'emailCase' | 'emailSign' | 'draft' | 'whatsapp' | 'call' | 'campaignEmail'>();
+  const [dialog, setDialog] = React.useState<'convert' | 'email' | 'meeting' | 'lost' | 'emailQuote' | 'emailInvoice' | 'emailCase' | 'emailSign' | 'draft' | 'whatsapp' | 'call' | 'campaignEmail' | 'portalInvite'>();
   const [kbArticle, setKbArticle] = React.useState<IRecord>();
   const [signLink, setSignLink] = React.useState('');
   const [history, setHistory] = React.useState<IRecord[]>();
@@ -179,7 +189,7 @@ export const RecordPanel: React.FC<IProps> = ({ entity, record, onClose, canGoBa
       cmds.push({ key: 'lost', text: 'Lost', iconProps: { iconName: 'Cancel' }, disabled: draft.stage === LOST, onClick: () => { setDraft({ ...draft, stage: LOST }); setDialog('lost'); } });
       if (engine.can('create', 'quotes')) {
         cmds.push({ key: 'quote', text: 'New quote', iconProps: { iconName: 'Document' }, onClick: () => open('quotes', {
-          title: draft.title, opportunityRef: draft.id, accountRef: draft.accountRef, contactRef: draft.contactRef, lineItems: [], owner: draft.owner || engine.me
+          title: draft.title, opportunityRef: draft.id, accountRef: draft.accountRef, contactRef: draft.contactRef, lineItems: [], owner: draft.owner || engine.me, currency: draft.currency
         }) });
       }
     }
@@ -284,6 +294,13 @@ export const RecordPanel: React.FC<IProps> = ({ entity, record, onClose, canGoBa
       if (engine.can('create', 'cases')) { cmds.push({ key: 'newcase', text: 'New case', iconProps: { iconName: 'Headset' }, onClick: () => open('cases', { ...base }) }); }
       if (entity === 'accounts' && engine.can('create', 'contacts')) { cmds.push({ key: 'newcon', text: 'New contact', iconProps: { iconName: 'AddFriend' }, onClick: () => open('contacts', { accountRef: draft.id }) }); }
     }
+    if (entity === 'contacts' && writable && /^https:\/\//i.test(settings.service.portalUrl || '') && draft.email) {
+      cmds.push({ key: 'portal', text: 'Invite to portal', iconProps: { iconName: 'Globe' }, onClick: () => setDialog('portalInvite') });
+    }
+    if ((entity === 'leads' || entity === 'accounts') && writable) {
+      cmds.push({ key: 'enrich', text: 'Enrich', iconProps: { iconName: 'Search' }, disabled: dirty || draft.enrichStatus === 'Requested',
+        onClick: () => run(() => requestEnrichment(engine, entity, draft).then(x => { setDraft({ ...x }); return 'Enrichment requested. Company details appear in a minute (flow “Lead enrichment”).'; })) });
+    }
     if ((entity === 'leads' || entity === 'contacts') && writable && settings.sequences.length) {
       cmds.push({ key: 'seq', text: draft.sequenceStatus === 'Active' ? 'Sequence' : 'Add to sequence', iconProps: { iconName: 'Flow' }, disabled: dirty, subMenuProps: {
         items: [
@@ -323,25 +340,25 @@ export const RecordPanel: React.FC<IProps> = ({ entity, record, onClose, canGoBa
       bits.push(<span key="sq" className="crm-muted">Sequence {draft.sequenceName}: {draft.sequenceStatus === 'Active' ? `step ${(Number(draft.sequenceStep) || 0) + 1}, next ${fmtDate(draft.sequenceNextDue)}` : draft.sequenceStatus.toLowerCase()}</span>);
     }
     if (entity === 'leads') { bits.push(<Pill key="r" text={draft.rating} />, <span key="s">Score <ScoreBadge score={draft.leadScore} /></span>); }
-    if (entity === 'opportunities') { bits.push(<b key="a">{fmtMoney(draft.amount || 0, currency)}</b>, <span key="p">{draft.probability ?? 0}%</span>, <span key="c">close {fmtDate(draft.expectedCloseDate)}</span>); }
+    if (entity === 'opportunities') { bits.push(<b key="a">{fmtMoney(draft.amount || 0, draft.currency || currency)}</b>, <span key="p">{draft.probability ?? 0}%</span>, <span key="c">close {fmtDate(draft.expectedCloseDate)}</span>); }
     if (entity === 'invoices') {
-      bits.push(<b key="n">{draft.invoiceNumber}</b>, <b key="t">{fmtMoney(quoteTotals(draft.lineItems || []).grandTotal, currency)}</b>, <span key="d">due {fmtDate(draft.dueDate)}</span>);
+      bits.push(<b key="n">{draft.invoiceNumber}</b>, <b key="t">{fmtMoney(quoteTotals(draft.lineItems || []).grandTotal, draft.currency || currency)}</b>, <span key="d">due {fmtDate(draft.dueDate)}</span>);
       if (draft.amountPaid) { bits.push(<span key="p">paid {fmtMoney(draft.amountPaid, currency)}</span>); }
     }
-    if (entity === 'subscriptions') { bits.push(<b key="m">MRR {fmtMoney(draft.mrr || 0, currency)}</b>, <span key="a">ARR {fmtMoney(draft.arr || 0, currency)}</span>, <span key="r">renews {fmtDate(draft.renewalDate)}</span>); }
+    if (entity === 'subscriptions') { bits.push(<b key="m">MRR {fmtMoney(draft.mrr || 0, draft.currency || currency)}</b>, <span key="a">ARR {fmtMoney(draft.arr || 0, draft.currency || currency)}</span>, <span key="r">renews {fmtDate(draft.renewalDate)}</span>); }
     if (entity === 'quotes' && draft.signatureStatus) {
       bits.push(<Pill key="sig" text={draft.signatureStatus === 'Signed' ? `Signed by ${draft.signatureName}` : `E-signature: ${draft.signatureStatus}`} />);
     }
-    if (entity === 'quotes') { bits.push(<b key="q">{draft.quoteNumber}</b>, <b key="t">{fmtMoney(quoteTotals(draft.lineItems || []).grandTotal, currency)}</b>); }
+    if (entity === 'quotes') { bits.push(<b key="q">{draft.quoteNumber}</b>, <b key="t">{fmtMoney(quoteTotals(draft.lineItems || []).grandTotal, draft.currency || currency)}</b>); }
     if (entity === 'cases') { bits.push(<b key="n">{draft.caseNumber}</b>, <Pill key="pr" text={draft.priority} />); if (slaBreached(draft)) { bits.push(<Pill key="sla" text="Breached" />); } if (draft.slaPausedAt) { bits.push(<span key="pz" className="crm-muted">SLA paused</span>); } if (firstResponseLate(draft)) { bits.push(<Pill key="fr" text="First response late" />); } if (draft.csatScore) { bits.push(<span key="cs">{'★'.repeat(Number(draft.csatScore))}{'☆'.repeat(5 - Number(draft.csatScore))} CSAT</span>); } }
     if (entity === 'accounts') {
       const opps = (data.opportunities || []).filter(o => o.accountRef === draft.id);
-      bits.push(<span key="w">Won {fmtMoney(sum(opps.filter(o => o.stage === WON), o => o.amount), currency)}</span>,
-        <span key="o">Open pipeline {fmtMoney(sum(opps.filter(o => engine.openStages().indexOf(o.stage) >= 0), o => o.amount), currency)}</span>);
+      bits.push(<span key="w">Won {fmtMoney(sum(opps.filter(o => o.stage === WON), o => engine.baseAmount(o)), currency)}</span>,
+        <span key="o">Open pipeline {fmtMoney(sum(opps.filter(o => engine.openStages().indexOf(o.stage) >= 0), o => engine.baseAmount(o)), currency)}</span>);
     }
     if (entity === 'campaigns') {
       const leads = (data.leads || []).filter(l => l.campaignRef === draft.id);
-      const won = sum((data.opportunities || []).filter(o => o.campaignRef === draft.id && o.stage === WON), o => o.amount);
+      const won = sum((data.opportunities || []).filter(o => o.campaignRef === draft.id && o.stage === WON), o => engine.baseAmount(o));
       const cost = Number(draft.actualCost || draft.budget || 0);
       bits.push(<span key="l">{leads.length} leads</span>, <span key="r">Won {fmtMoney(won, currency)}</span>,
         <span key="roi">ROI {cost ? `${Math.round(((won - cost) / cost) * 100)}%` : '—'}</span>);
@@ -373,7 +390,7 @@ export const RecordPanel: React.FC<IProps> = ({ entity, record, onClose, canGoBa
           <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 4 }}>
             {canGoBack && <IconButton iconProps={{ iconName: 'Back' }} ariaLabel="Back" title="Back" onClick={close} />}
             <Text variant="xLarge" styles={{ root: { fontWeight: 600, wordBreak: 'break-word' } }}>
-              {isNew ? `New ${def.singular.toLowerCase()}` : (draft.title || draft.quoteNumber || `${def.singular} #${draft.id}`)}
+              {isNew ? newOf(def.singular) : (draft.title || draft.quoteNumber || `${def.singular} #${draft.id}`)}
             </Text>
             {busy && <Spinner size={SpinnerSize.small} />}
           </Stack>
@@ -382,16 +399,16 @@ export const RecordPanel: React.FC<IProps> = ({ entity, record, onClose, canGoBa
       )}
       onRenderFooterContent={() => (
         <Stack horizontal tokens={{ childrenGap: 8 }}>
-          {canEdit && <PrimaryButton text={isNew ? 'Create' : 'Save'} disabled={busy || (!dirty && !isNew)} onClick={() => save(false)} />}
-          {canEdit && !isNarrow && <DefaultButton text={isNew ? 'Create & close' : 'Save & close'} disabled={busy || (!dirty && !isNew)} onClick={() => save(true)} />}
-          <DefaultButton text={canEdit ? 'Cancel' : 'Close'} onClick={close} />
+          {canEdit && <PrimaryButton text={tr(isNew ? 'Create' : 'Save')} disabled={busy || (!dirty && !isNew)} onClick={() => save(false)} />}
+          {canEdit && !isNarrow && <DefaultButton text={isNew ? `${tr('Create')} & ${tr('Close').toLowerCase()}` : tr('Save & close')} disabled={busy || (!dirty && !isNew)} onClick={() => save(true)} />}
+          <DefaultButton text={tr(canEdit ? 'Cancel' : 'Close')} onClick={close} />
           {!isNew && engine.can('delete', entity) && (isNarrow
             ? <IconButton iconProps={{ iconName: 'Delete' }} title="Delete" ariaLabel="Delete" style={{ marginLeft: 'auto' }} onClick={() => setConfirmDelete(true)} />
-            : <DefaultButton text="Delete" iconProps={{ iconName: 'Delete' }} style={{ marginLeft: 'auto' }} onClick={() => setConfirmDelete(true)} />)}
+            : <DefaultButton text={tr('Delete')} iconProps={{ iconName: 'Delete' }} style={{ marginLeft: 'auto' }} onClick={() => setConfirmDelete(true)} />)}
         </Stack>
       )}
     >
-      {cmds.length > 0 && <CommandBar items={cmds} styles={{ root: { padding: 0, height: 40 } }} overflowButtonProps={{ ariaLabel: 'More actions' }} />}
+      {cmds.length > 0 && <CommandBar items={trItems(cmds)} styles={{ root: { padding: 0, height: 40 } }} overflowButtonProps={{ ariaLabel: 'More actions' }} />}
       {!canEdit && <MessageBar>{engine.license.canWrite ? 'You have read-only access to this record.' : engine.license.message}</MessageBar>}
       {error && <MessageBar messageBarType={MessageBarType.error} isMultiline onDismiss={() => setError(undefined)}>{error}</MessageBar>}
       {entity === 'quotes' && !isNew && engine.quoteApproval(draft).required && draft.approvalStatus !== 'Approved' && (
@@ -416,7 +433,7 @@ export const RecordPanel: React.FC<IProps> = ({ entity, record, onClose, canGoBa
       {mergeWith && <MergeDialog entity={entity} master={draft} duplicate={mergeWith} onClose={r => { setMergeWith(undefined); if (r) { setDraft({ ...r }); } }} />}
 
       <Pivot selectedKey={tab} onLinkClick={i => { const k = String(i?.props.itemKey); setTab(k); if (k === 'history') { loadHistory(); } }} overflowBehavior="menu">
-        <PivotItem itemKey="details" headerText="Details" itemIcon="Edit">
+        <PivotItem itemKey="details" headerText={tr('Details')} itemIcon="Edit">
           {!isNew && INSIGHT_ENTITIES.indexOf(entity) >= 0 && <SmartSummary entity={entity} record={draft} onDraft={() => setDialog('draft')} />}
           {!isNew && entity === 'cases' && <KbSuggestions caseRecord={draft} onReply={a => { setKbArticle(a); setDialog('emailCase'); }} onLinked={c => setDraft({ ...c })} />}
           <div className="crm-form">
@@ -426,7 +443,7 @@ export const RecordPanel: React.FC<IProps> = ({ entity, record, onClose, canGoBa
                 <div className="crm-form-grid">
                   {sections[s].map(f => (
                     <div key={f.key} className={f.type === 'note' || f.type === 'tags' || f.type === 'user' || f.type === 'datetime' ? 'crm-span' : undefined}>
-                      <FieldEditor fd={f} value={draft[f.key]} disabled={!canEdit} error={errors[f.key]} onChange={v => {
+                      <FieldEditor fd={f} value={draft[f.key]} disabled={!canEdit} error={errors[f.key]} currencyCode={draft.currency} onChange={v => {
                         set(f.key, v);
                         if (entity === 'opportunities' && f.key === 'stage') {
                           const st = engine.stage(v);
@@ -446,9 +463,9 @@ export const RecordPanel: React.FC<IProps> = ({ entity, record, onClose, canGoBa
           </div>
         </PivotItem>
         {(entity === 'quotes' || entity === 'invoices') && (
-          <PivotItem itemKey="lines" headerText="Line items" itemIcon="BulletedList" itemCount={(draft.lineItems || []).length}>
+          <PivotItem itemKey="lines" headerText={tr('Line items')} itemIcon="BulletedList" itemCount={(draft.lineItems || []).length}>
             <div style={{ paddingTop: 12 }}>
-              <QuoteLines items={(draft.lineItems || []) as ILineItem[]} disabled={!canEdit} onChange={items => set('lineItems', items)} />
+              <QuoteLines items={(draft.lineItems || []) as ILineItem[]} disabled={!canEdit} onChange={items => set('lineItems', items)} priceBook={draft.priceBook} currencyCode={draft.currency} />
             </div>
           </PivotItem>
         )}
@@ -463,12 +480,12 @@ export const RecordPanel: React.FC<IProps> = ({ entity, record, onClose, canGoBa
           );
         })}
         {!isNew && entity !== 'activities' && (
-          <PivotItem itemKey="activity" headerText="Activity" itemIcon="History">
+          <PivotItem itemKey="activity" headerText={tr('Activity')} itemIcon="History">
             <div style={{ paddingTop: 12 }}><ActivityTimeline entity={entity} id={draft.id} /></div>
           </PivotItem>
         )}
         {!isNew && engine.hasFeature('audit') && settings.auditEnabled && (
-          <PivotItem itemKey="history" headerText="Audit" itemIcon="ComplianceAudit">
+          <PivotItem itemKey="history" headerText={tr('Audit')} itemIcon="ComplianceAudit">
             <div style={{ paddingTop: 12 }}>
               {!history && <Spinner label="Loading history..." />}
               {history && history.length === 0 && <Text className="crm-muted">No recorded changes.</Text>}
@@ -522,6 +539,12 @@ export const RecordPanel: React.FC<IProps> = ({ entity, record, onClose, canGoBa
           body={`Hello,\n\n${kbArticle ? `${kbArticle.body || ''}${/^https:\/\//i.test(kbArticle.publicUrl || '') ? `\n\nMore details: ${kbArticle.publicUrl}` : ''}` : ''}\n\nKind regards,\n${engine.me?.title || ''}\n${engine.settings.company.name}\n\nPlease keep [${draft.caseNumber}] in the subject when you reply.`}
           onSent={() => { if (kbArticle && !draft.articleRef) { engine.linkArticle(draft, kbArticle).then(c => setDraft({ ...c })).catch(() => undefined); } }}
           onClose={() => { setDialog(undefined); setKbArticle(undefined); const c = engine.find('cases', draft.id); if (c) { setDraft(d => ({ ...c, articleRef: d.articleRef ?? c.articleRef })); } }} />
+      )}
+      {dialog === 'portalInvite' && (
+        <EmailDialog entity={entity} record={draft} to={draft.email}
+          subject={`Your ${settings.company.name || 'support'} customer portal`}
+          body={`Hello ${draft.firstName || ''},\n\nYou can now follow your support requests, reply to our team and open new requests in our customer portal:\n\n${settings.service.portalUrl}&p=login\n\nSign in with this email address (${draft.email}); we send you a sign-in link.\n\nBest regards,\n${engine.me?.title || ''}`}
+          onClose={() => setDialog(undefined)} />
       )}
       {dialog === 'campaignEmail' && <CampaignEmailDialog campaign={draft} onClose={() => { setDialog(undefined); const x = engine.find('campaigns', draft.id); if (x) { setDraft({ ...x }); } }} />}
       {dialog === 'call' && <CallDialog entity={entity} record={draft} onClose={() => setDialog(undefined)} />}

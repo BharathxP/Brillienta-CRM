@@ -1,3 +1,4 @@
+import { lc, newOf, tr } from '../../i18n';
 import { ACCOUNTING_FORMATS, exportInvoices } from '../../services/Accounting';
 import * as React from 'react';
 import {
@@ -14,6 +15,11 @@ import { errorText, exportCsv, fmtMoney, lsGet, lsSet, sortBy, sum } from '../ut
 interface IView { name: string; q: string; filters: Record<string, string>; sortKey: string; desc: boolean; mode: 'list' | 'board' }
 
 const ALL = '__all';
+
+const trItems = (items: ICommandBarItemProps[]): ICommandBarItemProps[] => items.map(c => ({
+  ...c, text: c.text ? tr(c.text) : c.text,
+  ...(c.subMenuProps ? { subMenuProps: { ...c.subMenuProps, items: c.subMenuProps.items.map(i => ({ ...i, text: i.text ? tr(i.text) : i.text })) } } : {})
+}));
 
 export const EntityGrid: React.FC<{ entity: EntityKey; title?: string; initialFilters?: Record<string, string>; defaultMode?: 'list' | 'board' }> =
   ({ entity, initialFilters = {}, defaultMode }) => {
@@ -74,6 +80,8 @@ export const EntityGrid: React.FC<{ entity: EntityKey; title?: string; initialFi
     }), sortKey as keyof IRecord, desc);
 
     const moneyField = def.fields.find(f => f.type === 'currency' && f.grid);
+    // Totals in the company currency (records can be in other currencies).
+    const baseOf = (r: IRecord): number => (entity === 'opportunities' ? engine.baseAmount(r) : engine.toBase(Number(r[moneyField!.key]) || 0, r.currency));
 
     const sortableValue = (fd: IFieldDef): string => fd.key;
     const columns: IColumn[] = def.fields.filter(f => visibleCols.indexOf(f.key) >= 0 || f.key === 'title').map((f): IColumn => ({
@@ -134,7 +142,7 @@ export const EntityGrid: React.FC<{ entity: EntityKey; title?: string; initialFi
     const sel = selected.length;
     const items: ICommandBarItemProps[] = [];
     if (engine.can('create', entity)) {
-      items.push({ key: 'new', text: `New ${def.singular.toLowerCase()}`, iconProps: { iconName: 'Add' }, onClick: () => open(entity, {}) });
+      items.push({ key: 'new', text: newOf(def.singular), iconProps: { iconName: 'Add' }, onClick: () => open(entity, {}) });
     }
     if (sel && engine.can('edit', entity)) {
       items.push({ key: 'bulk', text: `Edit ${sel}`, iconProps: { iconName: 'Edit' }, onClick: () => setDialog('bulk') });
@@ -216,8 +224,8 @@ export const EntityGrid: React.FC<{ entity: EntityKey; title?: string; initialFi
               <div key={lane} className={`crm-lane ${over === lane ? 'crm-lane-over' : ''}`}
                 onDragOver={e => { e.preventDefault(); setOver(lane); }} onDragLeave={() => setOver(undefined)} onDrop={e => { e.preventDefault(); drop(lane); }}>
                 <div className="crm-lane-head">
-                  <Text styles={{ root: { fontWeight: 600 } }}>{lane}</Text>
-                  <Text variant="small" className="crm-muted">{cards.length}{moneyField ? ` · ${fmtMoney(sum(cards, c => Number(c[moneyField.key]) || 0), currency)}` : ''}</Text>
+                  <Text styles={{ root: { fontWeight: 600 } }}>{tr(lane)}</Text>
+                  <Text variant="small" className="crm-muted">{cards.length}{moneyField ? ` · ${fmtMoney(sum(cards, baseOf), currency)}` : ''}</Text>
                 </div>
                 {cards.slice(0, 200).map(r => (
                   <div key={r.id} className="crm-card-item" draggable={engine.can('edit', entity)} tabIndex={0} role="button" aria-label={`${r.title}, ${lane}`}
@@ -237,21 +245,21 @@ export const EntityGrid: React.FC<{ entity: EntityKey; title?: string; initialFi
 
     return (
       <Stack tokens={{ childrenGap: 8 }}>
-        <CommandBar items={items} farItems={far} styles={{ root: { padding: 0 } }} />
+        <CommandBar items={trItems(items)} farItems={trItems(far)} styles={{ root: { padding: 0 } }} />
         <div className="crm-filterbar">
-          <SearchBox placeholder={`Search ${def.plural.toLowerCase()}...`} value={q} onChange={(_, v) => setQ(v || '')} className="crm-filter-search" />
+          <SearchBox placeholder={`${tr('Search')} ${lc(def.plural)}…`} value={q} onChange={(_, v) => setQ(v || '')} className="crm-filter-search" />
           {['opportunities', 'leads', 'cases', 'activities', 'demos'].indexOf(entity) >= 0 && (
             <Dropdown ariaLabel="Open or all" selectedKey={filters.__open || ALL} styles={{ root: { width: 120 } }}
-              options={[{ key: ALL, text: 'All' }, { key: 'open', text: 'Open only' }]} onChange={(_, o) => setFilters({ ...filters, __open: String(o?.key) })} />
+              options={[{ key: ALL, text: tr('All') }, { key: 'open', text: tr('Open only') }]} onChange={(_, o) => setFilters({ ...filters, __open: String(o?.key) })} />
           )}
           {filterFields.length > 0 && (
-            <DefaultButton iconProps={{ iconName: 'Filter' }} text={activeFilters ? `Filters (${activeFilters})` : 'Filters'} checked={showFilters}
+            <DefaultButton iconProps={{ iconName: 'Filter' }} text={activeFilters ? `${tr('Filters')} (${activeFilters})` : tr('Filters')} checked={showFilters}
               primary={activeFilters > 0 && !showFilters} onClick={() => setShowFilters(!showFilters)} ariaLabel="Show filters" />
           )}
           {(activeFilters > 0 || q) && <Link onClick={() => { setQ(''); setFilters(filters.__open ? { __open: filters.__open } : {}); }}>Clear</Link>}
           <Text variant="small" className="crm-muted crm-filter-count">
             {filtered.length} of {all.length}
-            {moneyField && filtered.length > 0 && <> · {moneyField.label === 'Total' ? 'Total value' : `Total ${moneyField.label.toLowerCase()}`} {fmtMoney(sum(filtered, r => Number(r[moneyField.key]) || 0), currency)}</>}
+            {moneyField && filtered.length > 0 && <> · {moneyField.label === 'Total' ? 'Total value' : `Total ${moneyField.label.toLowerCase()}`} {fmtMoney(sum(filtered, baseOf), currency)}</>}
             {sel > 0 && <> · {sel} selected</>}
           </Text>
         </div>

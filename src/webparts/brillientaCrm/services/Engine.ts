@@ -1,12 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { DataService, Role } from './DataService';
 import { GraphService, WebhookService } from './Integrations';
-import { CrmData, EntityKey, IEntityDef, IRecord, IUserRef, LOST, WON } from '../models/model';
-import { ICrmSettings } from '../models/settings';
+import { CrmData, ENTITIES, EntityKey, IEntityDef, IRecord, IUserRef, LOST, SECURED_ENTITIES, WON } from '../models/model';
+import { ICrmSettings, IPriceBook as IPriceBookDef, ITeam as ITeamDef } from '../models/settings';
 import { ILicenseInfo } from '../models/license';
 import { addBusinessHours, businessHoursBetween } from './BusinessHours';
 import { waNumber } from './WhatsApp';
+import { companyDomain, quickEnrich } from './Enrichment';
 import { fmtMoney } from '../components/utils';
+import { isNetworkError, offlineStore } from './OfflineStore';
 
 export type Action = 'read' | 'create' | 'edit' | 'delete' | 'import' | 'export' | 'bulk' | 'admin' | 'reports' | 'forecast';
 
@@ -158,7 +160,16 @@ export class Engine {
 
   public refresh(key: EntityKey): Promise<IRecord[]> {
     if (!this.loading[key]) {
-      this.loading[key] = this.ds.getAll(key).then(rows => {
+      this.loading[key] = this.ds.getAll(key).then(async loaded => {
+        let rows = loaded;
+        if (this.ds.offlineSince) {
+          // Show changes made offline on top of the saved copy.
+          for (const q of (await offlineStore.queue(this.ds.cacheScope)).filter(x => x.key === key)) {
+            const id = q.record.id || q.tempId;
+            const prev = rows.find(r => r.id === id);
+            rows = prev ? rows.map(r => (r.id === id ? { ...r, ...q.record, id, pendingSync: true } : r)) : [{ ...q.record, id, pendingSync: true, created: q.at, modified: q.at, author: this.me }, ...rows];
+          }
+        }
         this.data[key] = rows;
         this.onData(key, rows);
         delete this.loading[key];
@@ -279,9 +290,14 @@ export class Engine {
         x.title = `${x.firstName || ''} ${x.lastName || ''}`.trim() || x.email || x.company || 'Lead';
         x.leadScore = this.scoreLead({ ...prev, ...x });
         if ('phone' in x) { x.whatsapp = waNumber(x.phone, this.settings.whatsapp.defaultCountryCode); }
-        if (isNew && !x.owner && this.settings.assignment.autoAssignNewLeads) {
+        if (isNew) {
+          Object.assign(x, quickEnrich(x));
+          if (this.settings.enrichment.autoNewLeads && !x.enrichStatus && companyDomain(x)) { x.enrichStatus = 'Requested'; }
+        }
+        if (isNew && !x.owner) {
+          const team = this.territoryTeam(x.country);
           // eslint-disable-next-line require-atomic-updates -- x is a local copy
-          x.owner = await this.nextRoundRobin();
+          x.owner = team ? await this.nextTeamMember(team.id) : this.settings.assignment.autoAssignNewLeads ? await this.nextRoundRobin() : undefined;
         }
         break;
       case 'contacts':
@@ -302,6 +318,8 @@ export class Engine {
           }
         }
         if (!x.title) { x.title = `${this.display('accounts', x.accountRef) || x.company || 'New'} deal`; }
+        if (!x.currency) { x.currency = this.settings.currency; }
+        x.amountBase = this.toBase(x.amount, x.currency);
         break;
       }
       case 'quotes': {
@@ -316,7 +334,7 @@ export class Engine {
         if (prev && prev.signatureStatus === 'Signed' && (Math.abs((prev.grandTotal || 0) - t.grandTotal) > 0.005 || JSON.stringify(prev.lineItems || []) !== JSON.stringify(x.lineItems || []))) {
           throw new Error('This quote was signed electronically, so its line items can no longer change. Create a new quote for the changes.');
         }
-        if (!x.currency) { x.currency = this.settings.currency || 'USD'; }
+        if (!x.currency) { x.currency = this.priceBook(x.priceBook)?.currency || (x.opportunityRef ? this.find('opportunities', x.opportunityRef)?.currency : '') || this.settings.currency || 'USD'; }
         Object.keys(t).forEach(k => { x[k] = (t as any)[k]; });
         // Any price change after approval requires a new approval.
         if (prev && prev.approvalStatus === 'Approved' && Math.abs((prev.grandTotal || 0) - t.grandTotal) > 0.005) {
@@ -355,6 +373,7 @@ export class Engine {
         if (x.quantity === undefined || x.quantity === null) { x.quantity = 1; }
         if (!x.startDate && isNew) { x.startDate = new Date().toISOString(); }
         if (!x.renewalDate && x.startDate) { x.renewalDate = addPeriod(x.startDate, x.billingCycle); }
+        if (!x.currency) { x.currency = this.settings.currency; }
         x.mrr = subscriptionMrr(x);
         x.arr = Math.round(x.mrr * 12 * 100) / 100;
         if ((x.subStatus === 'Cancelled' || x.subStatus === 'Expired') && !x.endDate) { x.endDate = x.renewalDate || new Date().toISOString(); }
@@ -413,7 +432,8 @@ export class Engine {
     const summary = (s: string): string => `${s}: ${x.title || x.quoteNumber || ''}`;
     const data = { id: x.id, entity: key, ...this.plain(x) };
     if (isNew) {
-      const ev = key === 'demos' ? 'demo.requested' : `${d.singular.toLowerCase().replace(/\s/g, '')}.created`;
+      const en = ENTITIES.find(e => e.key === key)!;
+      const ev = key === 'demos' ? 'demo.requested' : `${en.singular.toLowerCase().replace(/\s/g, '')}.created`;
       this.webhooks.emit(ev, data, summary(`New ${d.singular.toLowerCase()}`));
     }
     if ((key === 'leads' || key === 'contacts') && prev && (!!prev.marketingConsent !== !!x.marketingConsent || !!prev.unsubscribed !== !!x.unsubscribed)) {
@@ -477,7 +497,13 @@ export class Engine {
     }
     const prev = r.id ? this.find(key, r.id) : undefined;
     const x = await this.beforeSave(key, r, prev);
-    const id = await this.ds.save(key, x);
+    let id: number;
+    try {
+      id = await this.ds.save(key, x);
+    } catch (e) {
+      if (!isNetworkError(e)) { throw e; }
+      return this.queueOffline(key, x, prev);
+    }
     if (key === 'cases' && !x.caseNumber) { await this.ds.save('cases', { id, caseNumber: this.caseNumberFor(id) }); }
     const fresh = await this.ds.getOne(key, id);
     this.upsertCache(key, fresh);
@@ -486,6 +512,11 @@ export class Engine {
       this.ds.writeAudit(prev ? 'Updated' : 'Created', key, id, fresh.title || fresh.quoteNumber || '', prev ? changes : undefined).catch(() => undefined);
     }
     this.afterSave(key, prev, fresh);
+    // Item-level security: administrators secure records straight away; for everyone else the
+    // "Record security" flow (service account) does it within 15 minutes.
+    if (this.settings.security.itemLevel && this.role === 'admin' && fresh.owner?.id && fresh.securedOwner !== fresh.owner.id && SECURED_ENTITIES.indexOf(key) >= 0) {
+      this.secureRecord(key, fresh).catch(() => undefined);
+    }
     return fresh;
   }
 
@@ -503,6 +534,7 @@ export class Engine {
   }
 
   public async remove(key: EntityKey, id: number): Promise<void> {
+    if (this.ds.offlineSince || (typeof navigator !== 'undefined' && navigator.onLine === false)) { throw new Error('Deleting is not available offline.'); }
     if (!this.can('delete', key)) { throw new Error('You do not have permission to delete records.'); }
     const prev = this.find(key, id);
     await this.ds.remove(key, id);
@@ -512,9 +544,15 @@ export class Engine {
 
   public async logActivity(key: EntityKey, id: number, title: string, details: string = '', type: string = 'Note'): Promise<void> {
     if (!this.license?.canWrite) { return; }
-    const rec = await this.ds.save('activities', {
-      title, details, activityType: type, relatedType: this.def(key).activityName, relatedId: id, completed: true
-    });
+    const act = { title, details, activityType: type, relatedType: this.def(key).activityName, relatedId: id, completed: true };
+    let rec: number;
+    try {
+      rec = await this.ds.save('activities', act);
+    } catch (e) {
+      if (!isNetworkError(e)) { throw e; }
+      await this.queueOffline('activities', act, undefined);
+      return;
+    }
     if (this.data.activities) {
       this.upsertCache('activities', await this.ds.getOne('activities', rec));
     }
@@ -583,7 +621,7 @@ export class Engine {
     await this.patch('quotes', q.id!, { quoteStatus: 'Accepted' });
     if (closeOpportunity && q.opportunityRef) {
       await this.ensure(['opportunities']);
-      await this.patch('opportunities', q.opportunityRef, { stage: WON, amount: q.grandTotal });
+      await this.patch('opportunities', q.opportunityRef, { stage: WON, amount: q.grandTotal, currency: q.currency || this.settings.currency });
     }
     if (q.accountRef) {
       await this.ensure(['accounts']);
@@ -603,7 +641,7 @@ export class Engine {
       out.push(await this.save('subscriptions', {
         title: `${i.name} - ${this.display('accounts', q.accountRef) || 'customer'}`,
         accountRef: q.accountRef, contactRef: q.contactRef, productRef: i.productId, opportunityRef: q.opportunityRef, quoteRef: q.id,
-        subStatus: 'Active', billingCycle: i.billing, quantity: Number(i.quantity) || 1, unitPrice: Math.round(perSeat * 100) / 100,
+        subStatus: 'Active', billingCycle: i.billing, currency: q.currency, quantity: Number(i.quantity) || 1, unitPrice: Math.round(perSeat * 100) / 100,
         startDate: new Date().toISOString(), autoRenew: true, owner: q.owner || this.me
       }));
     }
@@ -616,7 +654,7 @@ export class Engine {
 
   public async createInvoiceFromQuote(q: IRecord): Promise<IRecord> {
     return this.save('invoices', {
-      title: q.title, accountRef: q.accountRef, contactRef: q.contactRef, quoteRef: q.id, opportunityRef: q.opportunityRef,
+      title: q.title, accountRef: q.accountRef, contactRef: q.contactRef, quoteRef: q.id, opportunityRef: q.opportunityRef, currency: q.currency,
       invoiceStatus: 'Draft', lineItems: (q.lineItems || []).map((i: ILineItem) => ({ ...i })), owner: q.owner || this.me
     });
   }
@@ -628,7 +666,7 @@ export class Engine {
     const product = s.productRef ? this.find('products', s.productRef) : undefined;
     const period = `${new Date(from).toLocaleDateString()} – ${new Date(new Date(to).getTime() - DAY).toLocaleDateString()}`;
     return this.save('invoices', {
-      title: `${s.title} (${period})`, accountRef: s.accountRef, contactRef: s.contactRef, subscriptionRef: s.id, invoiceStatus: 'Draft',
+      title: `${s.title} (${period})`, accountRef: s.accountRef, contactRef: s.contactRef, subscriptionRef: s.id, invoiceStatus: 'Draft', currency: s.currency,
       lineItems: [{
         id: String(Date.now()), productId: s.productRef, name: product?.title || s.title || 'Subscription', description: `${s.billingCycle} subscription, ${period}`,
         quantity: Number(s.quantity) || 1, unitPrice: Number(s.unitPrice) || 0, discountPct: 0, taxPct: Number(product?.taxRate) || 0, billing: s.billingCycle
@@ -696,7 +734,7 @@ export class Engine {
         await this.save('opportunities', {
           title: `Renewal ${new Date(s.renewalDate).getFullYear()} - ${s.title}`, dealType: 'Renewal', subscriptionRef: s.id,
           accountRef: s.accountRef, contactRef: s.contactRef, stage: stages[Math.min(2, stages.length - 1)] || stages[0],
-          amount: Math.round((s.arr || subscriptionMrr(s) * 12) * 100) / 100, expectedCloseDate: s.renewalDate,
+          amount: Math.round((s.arr || subscriptionMrr(s) * 12) * 100) / 100, currency: s.currency, expectedCloseDate: s.renewalDate,
           owner: s.owner || this.me, notes: `Automatic renewal opportunity for subscription #${s.id}.`
         });
         if (s.subStatus !== 'Pending renewal') { await this.patch('subscriptions', s.id!, { subStatus: 'Pending renewal' }); }
@@ -779,6 +817,176 @@ export class Engine {
         `✍ Quote signed: ${q.quoteNumber} by ${q.signatureName} (${q.grandTotal} ${this.settings.currency})`);
     }
     return todo.length;
+  }
+
+  // ------------------------------------------------------------------ offline
+
+  public pendingChanges: number = 0;
+  public onPendingChange?: () => void;
+
+  /** Saves the change on this device and shows it straight away; it is sent to SharePoint when back online. */
+  private async queueOffline(key: EntityKey, x: IRecord, prev?: IRecord): Promise<IRecord> {
+    const tempId = x.id || -Date.now();
+    const plain: IRecord = { ...x };
+    await offlineStore.enqueue({ scope: this.ds.cacheScope, key, record: plain, tempId: x.id ? undefined : tempId, at: new Date().toISOString() });
+    const optimistic: IRecord = { ...prev, ...x, id: tempId, modified: new Date().toISOString(), created: prev?.created || new Date().toISOString(), author: prev?.author || this.me, pendingSync: true };
+    this.upsertCache(key, optimistic);
+    this.pendingChanges = (await offlineStore.queue(this.ds.cacheScope)).length;
+    this.onPendingChange?.();
+    return optimistic;
+  }
+
+  public async countPending(): Promise<number> {
+    this.pendingChanges = (await offlineStore.queue(this.ds.cacheScope)).length;
+    return this.pendingChanges;
+  }
+
+  /** Sends queued offline changes in order. New records get their real ids, and later changes are re-pointed. */
+  public async syncOffline(): Promise<{ sent: number; failed: number }> {
+    const queue = await offlineStore.queue(this.ds.cacheScope);
+    const map: Record<number, number> = {};
+    const touched: EntityKey[] = [];
+    const res = { sent: 0, failed: 0 };
+    const fix = (v: unknown): unknown => (typeof v === 'number' && v < 0 && map[v] ? map[v] : v);
+    for (const q of queue) {
+      const rec: IRecord = { ...q.record };
+      Object.keys(rec).forEach(k => { if (k === 'id' || k === 'relatedId' || /Ref$/.test(k)) { rec[k] = fix(rec[k]); } });
+      if (typeof rec.id === 'number' && rec.id < 0) { delete rec.id; }
+      delete rec.pendingSync;
+      try {
+        const id = await this.ds.save(q.key as EntityKey, rec);
+        if (q.tempId) { map[q.tempId] = id; }
+        await offlineStore.remove(q.seq!);
+        if (touched.indexOf(q.key as EntityKey) < 0) { touched.push(q.key as EntityKey); }
+        this.ds.writeAudit(rec.id ? 'Updated (offline)' : 'Created (offline)', q.key, id, rec.title || '', undefined).catch(() => undefined);
+        res.sent++;
+      } catch (e) {
+        if (isNetworkError(e)) { break; }
+        // SharePoint refused it (e.g. permissions or a deleted record): keep it out of the way and report.
+        await offlineStore.remove(q.seq!);
+        res.failed++;
+      }
+    }
+    await Promise.all(touched.filter(k => this.data[k]).map(k => this.refresh(k)));
+    await this.countPending();
+    this.onPendingChange?.();
+    return res;
+  }
+
+  // ------------------------------------------------------------------ teams & territories
+
+  /** Team whose territory list contains the country (case-insensitive). */
+  public territoryTeam(country?: string): ITeamDef | undefined {
+    const c = String(country || '').trim().toLowerCase();
+    if (!c) { return undefined; }
+    return (this.settings.teams || []).find(t => t.members.length && t.territories.some(x => x.trim().toLowerCase() === c));
+  }
+
+  private async nextTeamMember(teamId: string): Promise<IUserRef | undefined> {
+    const teams = this.settings.teams || [];
+    const t = teams.find(x => x.id === teamId);
+    if (!t || !t.members.length) { return undefined; }
+    const idx = ((t.lastIndex ?? -1) + 1) % t.members.length;
+    await this.ds.saveSettings({ ...this.settings, teams: teams.map(x => (x.id === teamId ? { ...x, lastIndex: idx } : x)) }).catch(() => undefined);
+    return t.members[idx];
+  }
+
+  /** Users who get access to a record besides the owner: the owner's team managers, and team members per settings. */
+  public teamAccessFor(ownerId: number): { userId: number; edit: boolean }[] {
+    const mode = this.settings.security.teamAccess;
+    const out: { userId: number; edit: boolean }[] = [];
+    this.teamsOf(ownerId).forEach(t => {
+      if (t.manager) { out.push({ userId: t.manager.id, edit: true }); }
+      if (mode !== 'none') { t.members.forEach(m => out.push({ userId: m.id, edit: mode === 'edit' })); }
+    });
+    return out;
+  }
+
+  public async secureRecord(key: EntityKey, r: IRecord): Promise<void> {
+    if (!r.owner?.id || SECURED_ENTITIES.indexOf(key) < 0) { return; }
+    await this.ds.secureItem(key, r.id!, r.owner.id, this.teamAccessFor(r.owner.id));
+  }
+
+  /** Applies (or removes) item-level permissions on every secured record. Administrators only. */
+  public async applyItemSecurity(on: boolean, onProgress: (msg: string) => void, force: boolean = false): Promise<{ secured: number; skipped: number }> {
+    if (!this.can('admin')) { throw new Error('Only CRM administrators can change record permissions.'); }
+    await this.ensure(SECURED_ENTITIES);
+    const res = { secured: 0, skipped: 0 };
+    for (const key of SECURED_ENTITIES) {
+      const rows = this.data[key] || [];
+      let i = 0;
+      for (const r of rows) {
+        i++;
+        if (i % 10 === 0) { onProgress(`${this.def(key).plural}: ${i} of ${rows.length}`); }
+        if (on && r.owner?.id && (force || r.securedOwner !== r.owner.id)) { await this.secureRecord(key, r); res.secured++; }
+        else if (!on && r.securedOwner) { await this.ds.unsecureItem(key, r.id!); res.secured++; }
+        else { res.skipped++; }
+      }
+      if (rows.length) { await this.refresh(key); }
+    }
+    return res;
+  }
+
+  /** Routes unassigned new leads (e.g. from website or AppSource flows) to their territory team. Managers/admins, on open. */
+  public async routeUnassignedLeads(): Promise<number> {
+    if (!this.license?.canWrite || !(this.role === 'admin' || this.role === 'manager') || !(this.settings.teams || []).length) { return 0; }
+    await this.ensure(['leads']);
+    let n = 0;
+    for (const l of (this.data.leads || []).filter(x => !x.owner && x.status === 'New')) {
+      const team = this.territoryTeam(l.country);
+      if (!team) { continue; }
+      const owner = await this.nextTeamMember(team.id);
+      if (owner) { await this.patch('leads', l.id!, { owner }); n++; }
+    }
+    return n;
+  }
+
+  /** Teams the user belongs to or manages. */
+  public teamsOf(userId?: number): ITeamDef[] {
+    if (!userId) { return []; }
+    return (this.settings.teams || []).filter(t => t.manager?.id === userId || t.members.some(m => m.id === userId));
+  }
+
+  /** User ids in the given team, or in all teams of the current user. */
+  public teamMemberIds(teamId?: string): number[] {
+    const teams = teamId ? (this.settings.teams || []).filter(t => t.id === teamId) : this.teamsOf(this.me?.id);
+    const ids: number[] = [];
+    teams.forEach(t => [t.manager, ...t.members].forEach(u => { if (u && ids.indexOf(u.id) < 0) { ids.push(u.id); } }));
+    return ids;
+  }
+
+  // ------------------------------------------------------------------ currencies & price books
+
+  /** Company-currency units for one unit of `code` (1 for the company currency or unknown codes). */
+  public rate(code?: string): number {
+    if (!code || code === this.settings.currency) { return 1; }
+    const r = (this.settings.currencies || []).find(c => c.code === code);
+    return r && r.rate > 0 ? r.rate : 1;
+  }
+
+  public toBase(amount: number, code?: string): number {
+    return Math.round((Number(amount) || 0) * this.rate(code) * 100) / 100;
+  }
+
+  /** Amount of a deal in the company currency (deals saved before 3.0 have no amountBase). */
+  public baseAmount(o: IRecord): number {
+    return o.amountBase !== undefined && o.amountBase !== null ? Number(o.amountBase) : this.toBase(o.amount, o.currency);
+  }
+
+  public priceBook(name?: string): IPriceBookDef | undefined {
+    return name ? (this.settings.priceBooks || []).find(b => b.name === name) : undefined;
+  }
+
+  /** Unit price of a product in a price book (specific price, else list price converted and discounted), or the list price. */
+  public priceFor(product: IRecord, bookName?: string, currency?: string): number {
+    const book = this.priceBook(bookName);
+    const r2 = (n: number): number => Math.round(n * 100) / 100;
+    if (book) {
+      const specific = book.prices[String(product.id)];
+      if (specific !== undefined && specific !== null && String(specific) !== '') { return Number(specific); }
+      return r2((Number(product.unitPrice) || 0) / this.rate(book.currency) * (1 - (book.discountPct || 0) / 100));
+    }
+    return r2((Number(product.unitPrice) || 0) / this.rate(currency));
   }
 
   // ------------------------------------------------------------------ GDPR / privacy
@@ -1070,7 +1278,7 @@ export class Engine {
       invoiceNumber: r.invoiceNumber || '',
       paymentLink: r.paymentLink || '',
       caseNumber: r.caseNumber || '',
-      total: r.grandTotal !== undefined ? fmtMoney(Math.max(0, r.grandTotal - (Number(r.amountPaid) || 0)), this.settings.currency || 'USD') : '',
+      total: r.grandTotal !== undefined ? fmtMoney(Math.max(0, r.grandTotal - (Number(r.amountPaid) || 0)), r.currency || this.settings.currency || 'USD') : '',
       companyName: this.settings.company.name || ''
     };
     return text.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, k) => (k in vars ? vars[k] : ''));

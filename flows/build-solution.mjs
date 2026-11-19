@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const VERSION = '1.5.0.0';
+const VERSION = '2.0.0.0';
 const SOLUTION = 'BrillientaCRMFlows';
 const PREFIX = 'bri';
 
@@ -31,6 +31,8 @@ const ENV = {
   waPhoneId: { schema: `${PREFIX}_WhatsAppPhoneNumberId`, name: 'WhatsApp phone number ID', def: 'not-set', desc: 'Meta › WhatsApp › API setup › Phone number ID of your WhatsApp Business number.' },
   waToken: { schema: `${PREFIX}_WhatsAppAccessToken`, name: 'WhatsApp access token', def: 'not-set', desc: 'Permanent System User access token with whatsapp_business_messaging. Treat as a password (consider an Azure Key Vault secret).' },
   waVerify: { schema: `${PREFIX}_WhatsAppVerifyToken`, name: 'WhatsApp webhook verify token', def: 'not-set', desc: 'Any long random text; enter the same value as the Verify token in Meta › WhatsApp › Configuration › Webhook.' },
+  portalUrl: { schema: `${PREFIX}_PortalUrl`, name: 'Customer portal URL', def: 'https://example.invalid/portal?not-set=1', desc: 'After import: copy the HTTP URL of the flow "Customer portal" here (it is used in the portal links and sign-in emails).' },
+  apolloKey: { schema: `${PREFIX}_ApolloApiKey`, name: 'Apollo.io API key', def: 'not-set', desc: 'Optional. Apollo.io API key for company firmographics (industry, size, location, revenue). Without it the enrichment flows only read the company website.' },
   apiKey: { schema: `${PREFIX}_InboundApiKey`, name: 'Inbound API key', def: 'not-set', desc: 'Long random secret that callers of the Inbound API flow send in the x-api-key header. The API is closed while this is not-set.' },
   mailbox: { schema: `${PREFIX}_SupportMailbox`, name: 'Support mailbox', def: 'support@contoso.com', desc: 'Shared mailbox watched by the Email to case flow (the flow connection needs Full Access or Send As on it).' },
   casePrefix: { schema: `${PREFIX}_CasePrefix`, name: 'Case number prefix', def: 'CS', desc: 'Same as Settings › Company › Case number prefix in the CRM. New email cases are numbered PREFIX-YEAR-ID.' },
@@ -51,7 +53,7 @@ const host = (c, op) => ({ connectionName: CONN[c].api, operationId: op, apiId: 
 const api = (c, op, parameters, runAfter = {}, extra = {}) => ({
   runAfter, type: 'OpenApiConnection', inputs: { host: host(c, op), parameters, authentication: "@parameters('$authentication')" }, ...extra
 });
-const LISTS = { demos: 'CRM Demo Requests', leads: 'AppSource Leads', accounts: 'CRM Accounts', opps: 'CRM Opportunities', quotes: 'CRM Quotes', cases: 'CRM Cases', acts: 'CRM Activities', invoices: 'CRM Invoices', subs: 'CRM Subscriptions', contacts: 'CRM Contacts' };
+const LISTS = { demos: 'CRM Demo Requests', leads: 'AppSource Leads', accounts: 'CRM Accounts', opps: 'CRM Opportunities', quotes: 'CRM Quotes', cases: 'CRM Cases', acts: 'CRM Activities', invoices: 'CRM Invoices', subs: 'CRM Subscriptions', contacts: 'CRM Contacts', settingsList: 'CRM Settings', articles: 'CRM Knowledge Base' };
 
 const getItems = (list, filter, runAfter = {}, top = 500) =>
   api('sp', 'GetItems', { dataset: P('site'), table: LISTS[list], '$filter': filter, '$top': top }, runAfter);
@@ -1133,6 +1135,303 @@ flow('Brillienta CRM - Inbound API',
     }
   });
 
+
+// 20 — Record security (item-level permissions by owner and team)
+const SEC_LISTS = [
+  { list: 'AppSource Leads', owner: 'LeadOwner', cases: false }, { list: 'CRM Accounts', owner: 'AccountOwner', cases: false },
+  { list: 'CRM Contacts', owner: 'ContactOwner', cases: false }, { list: 'CRM Opportunities', owner: 'DealOwner', cases: false },
+  { list: 'CRM Quotes', owner: 'QuoteOwner', cases: false }, { list: 'CRM Cases', owner: 'CaseOwner', cases: true },
+  { list: 'CRM Subscriptions', owner: 'SubscriptionOwner', cases: false }, { list: 'CRM Invoices', owner: 'InvoiceOwner', cases: false }
+];
+const S = (k) => `outputs('Settings')?['${k}']`;
+const grp = (name, key) => ({ [`Group_${name}`]: spHttp('GET', `_api/web/sitegroups/getbyname('@{replace(${S('groups')}?['${key}'], '''', '''''')}')?$select=Id`) });
+const role = (name, type) => ({ [`Role_${name}`]: spHttp('GET', `_api/web/roledefinitions/getbytype(${type})?$select=Id`) });
+const ITEM = "_api/web/lists/getbytitle('@{items('For_each_list')?['list']}')/items(@{items('For_each_item')?['Id']})";
+const OWNER = "items('For_each_item')?[concat(items('For_each_list')?['owner'], 'Id')]";
+const addRole = (principal, roleExpr, runAfter) => spHttp('POST', `${ITEM}/roleassignments/addroleassignment(principalid=@{${principal}},roledefid=@{${roleExpr}})`, undefined, runAfter);
+flow('Brillienta CRM - Record security',
+  'Every 15 minutes: for records created or reassigned since the last runs, gives each lead, account, contact, deal, quote, case, subscription and invoice its own SharePoint permissions (owner, owner\'s team manager and team per CRM settings, CRM groups). Runs only when Settings › Security › Record-level security is on. The connection must be a site owner (Full Control).',
+  ['sp'], ['site'],
+  { Every_15_minutes: { recurrence: { frequency: 'Minute', interval: 15 }, type: 'Recurrence' } },
+  {
+    Get_settings: getItems('settingsList', "Title eq 'settings'", {}, 1),
+    Settings: { runAfter: { Get_settings: ['Succeeded'] }, type: 'Compose', inputs: "@json(coalesce(first(body('Get_settings')?['value'])?['Value'], '{}'))" },
+    Enabled: {
+      runAfter: { Settings: ['Succeeded'] }, type: 'If', expression: { and: [{ equals: [`@coalesce(${S('security')}?['itemLevel'], false)`, true] }] },
+      actions: {
+        ...grp('admins', 'admins'), ...grp('managers', 'managers'), ...grp('support', 'support'), ...grp('readers', 'readers'),
+        ...role('read', 2), ...role('contribute', 3), ...role('full', 5),
+        For_each_list: {
+          runAfter: { Group_admins: ['Succeeded'], Group_managers: ['Succeeded'], Group_support: ['Succeeded', 'Failed'], Group_readers: ['Succeeded', 'Failed'], Role_read: ['Succeeded'], Role_contribute: ['Succeeded'], Role_full: ['Succeeded'] },
+          type: 'Foreach', foreach: `@json('${JSON.stringify(SEC_LISTS)}')`, runtimeConfiguration: { concurrency: { repetitions: 1 } },
+          actions: {
+            Changed_items: spHttp('GET', "_api/web/lists/getbytitle('@{items('For_each_list')?['list']}')/items?$select=Id,SecuredOwner,@{items('For_each_list')?['owner']}Id&$filter=Modified ge datetime'@{addMinutes(utcNow(), -40)}'&$top=1000"),
+            For_each_item: {
+              runAfter: { Changed_items: ['Succeeded'] }, type: 'Foreach', foreach: "@coalesce(body('Changed_items')?['value'], createArray())",
+              runtimeConfiguration: { concurrency: { repetitions: 4 } },
+              actions: {
+                Needs_securing: {
+                  runAfter: {}, type: 'If',
+                  expression: { and: [{ not: { equals: [`@coalesce(${OWNER}, 0)`, 0] } }, { not: { equals: [`@string(coalesce(items('For_each_item')?['SecuredOwner'], ''))`, `@string(${OWNER})`] } }] },
+                  actions: {
+                    Break_inheritance: spHttp('POST', `${ITEM}/breakroleinheritance(copyRoleAssignments=false,clearSubscopes=true)`),
+                    Grant_admins: addRole("body('Group_admins')?['Id']", "body('Role_full')?['Id']", { Break_inheritance: ['Succeeded'] }),
+                    Grant_managers: addRole("body('Group_managers')?['Id']", "body('Role_contribute')?['Id']", { Grant_admins: ['Succeeded'] }),
+                    Grant_support: addRole("body('Group_support')?['Id']", "if(items('For_each_list')?['cases'], body('Role_contribute')?['Id'], body('Role_read')?['Id'])", { Grant_managers: ['Succeeded'] }),
+                    Grant_readers: addRole("body('Group_readers')?['Id']", "body('Role_read')?['Id']", { Grant_support: ['Succeeded', 'Failed'] }),
+                    Grant_owner: addRole(OWNER, "body('Role_contribute')?['Id']", { Grant_readers: ['Succeeded', 'Failed'] }),
+                    Owner_teams: {
+                      runAfter: { Grant_owner: ['Succeeded'] }, type: 'Query',
+                      inputs: { from: `@coalesce(${S('teams')}, createArray())`, where: `@contains(string(item()), concat('"id":', string(${OWNER}), ','))` }
+                    },
+                    For_each_team: {
+                      runAfter: { Owner_teams: ['Succeeded'] }, type: 'Foreach', foreach: "@body('Owner_teams')", runtimeConfiguration: { concurrency: { repetitions: 1 } },
+                      actions: {
+                        Has_manager: {
+                          runAfter: {}, type: 'If', expression: { and: [{ greater: ["@coalesce(items('For_each_team')?['manager']?['id'], 0)", 0] }] },
+                          actions: { Grant_team_manager: addRole("items('For_each_team')?['manager']?['id']", "body('Role_contribute')?['Id']", {}) },
+                          else: { actions: {} }
+                        },
+                        Share_with_team: {
+                          runAfter: { Has_manager: ['Succeeded', 'Failed'] }, type: 'If', expression: { and: [{ not: { equals: [`@coalesce(${S('security')}?['teamAccess'], 'read')`, 'none'] } }] },
+                          actions: {
+                            For_each_member: {
+                              runAfter: {}, type: 'Foreach', foreach: "@coalesce(items('For_each_team')?['members'], createArray())", runtimeConfiguration: { concurrency: { repetitions: 1 } },
+                              actions: {
+                                Grant_member: addRole("items('For_each_member')?['id']", `if(equals(${S('security')}?['teamAccess'], 'edit'), body('Role_contribute')?['Id'], body('Role_read')?['Id'])`, {})
+                              }
+                            }
+                          },
+                          else: { actions: {} }
+                        }
+                      }
+                    },
+                    Mark_secured: spHttp('POST', `${ITEM}/ValidateUpdateListItem`, { formValues: [{ FieldName: 'SecuredOwner', FieldValue: `@{string(${OWNER})}` }], bNewDocumentUpdate: true }, { For_each_team: ['Succeeded', 'Failed'] })
+                  },
+                  else: { actions: {} }
+                }
+              }
+            }
+          }
+        }
+      },
+      else: { actions: {} }
+    }
+  });
+
+
+// 21/22 — Lead & account enrichment (company website + optional Apollo.io)
+const enrichFlow = (listKey, label) => {
+  const E = (k) => `triggerOutputs()?['body/${k}']`;
+  const DOMAIN = `@{toLower(first(split(replace(replace(replace(coalesce(${E('Website')}, concat('https://', last(split(coalesce(${E('Email')}, ''), '@')))), 'https://', ''), 'http://', ''), 'www.', ''), '/')))}`;
+  const HTML = "string(body('Read_website'))";
+  const between = (start, end) => `if(contains(${HTML}, '${start}'), trim(first(split(last(split(${HTML}, '${start}')), '${end}'))), '')`;
+  flow(`Brillienta CRM - ${label} enrichment`,
+    `When "Enrich" is clicked on a ${label.toLowerCase()} (or a new lead arrives with a business email): reads the company website (name, description, LinkedIn page) and, when an Apollo.io API key is set, adds industry, size, location and revenue. Writes the results to the record. Requires Power Automate Premium (HTTP).`,
+    ['sp'], ['site', 'apolloKey'],
+    { When_enrichment_is_requested: spPoll('GetOnUpdatedItems', listKey, [`@equals(${E('EnrichStatus/Value')}, 'Requested')`]) },
+    {
+      Domain: { runAfter: {}, type: 'Compose', inputs: DOMAIN },
+      Read_website: http('GET', "https://@{outputs('Domain')}", { 'User-Agent': 'Mozilla/5.0 (compatible; BrillientaCRM/3.0)', Accept: 'text/html' }, undefined, { Domain: ['Succeeded'] }),
+      Site_title: { runAfter: { Read_website: ['Succeeded', 'Failed', 'TimedOut'] }, type: 'Compose', inputs: `@{if(contains(${HTML}, '</title>'), trim(last(split(first(split(${HTML}, '</title>')), '>'))), '')}` },
+      Site_description: { runAfter: { Read_website: ['Succeeded', 'Failed', 'TimedOut'] }, type: 'Compose', inputs: `@{take(if(contains(${HTML}, 'name="description"'), first(split(last(split(first(split(last(split(${HTML}, 'name="description"')), '>')), 'content="')), '"')), ${between('property="og:description" content="', '"')}), 500)}` },
+      Site_linkedin: { runAfter: { Read_website: ['Succeeded', 'Failed', 'TimedOut'] }, type: 'Compose', inputs: `@{if(contains(${HTML}, 'linkedin.com/company/'), concat('https://www.linkedin.com/company/', first(split(first(split(first(split(last(split(${HTML}, 'linkedin.com/company/')), '"')), '/')), '?'))), '')}` },
+      Use_apollo: {
+        runAfter: { Site_title: ['Succeeded'], Site_description: ['Succeeded'], Site_linkedin: ['Succeeded'] }, type: 'If',
+        expression: { and: [{ not: { equals: [P('apolloKey'), 'not-set'] } }] },
+        actions: { Apollo: http('GET', "https://api.apollo.io/api/v1/organizations/enrich?domain=@{encodeUriComponent(outputs('Domain'))}", { 'X-Api-Key': Pi('apolloKey'), Accept: 'application/json' }) },
+        else: { actions: {} }
+      },
+      Org: { runAfter: { Use_apollo: ['Succeeded', 'Failed', 'TimedOut'] }, type: 'Compose', inputs: "@coalesce(body('Apollo')?['organization'], json('{}'))" },
+      Found: { runAfter: { Org: ['Succeeded'] }, type: 'Compose', inputs: `@or(not(empty(outputs('Site_title'))), not(empty(outputs('Org')?['name'])))` },
+      Save: api('sp', 'PatchItem', {
+        dataset: P('site'), table: LISTS[listKey], id: `@${E('ID')}`, 'item/Title': `@${E('Title')}`,
+        'item/EnrichStatus/Value': "@{if(outputs('Found'), 'Done', 'Not found')}", 'item/EnrichedAt': '@utcNow()',
+        'item/LinkedIn': `@{coalesce(${E('LinkedIn')}, outputs('Org')?['linkedin_url'], if(empty(outputs('Site_linkedin')), null, outputs('Site_linkedin')))}`,
+        ...(listKey === 'leads' ? { 'item/CompanySize': `@{coalesce(${E('CompanySize')}, string(outputs('Org')?['estimated_num_employees']), '')}` } : { 'item/Employees': `@coalesce(${E('Employees')}, outputs('Org')?['estimated_num_employees'])` }),
+        'item/CompanyInfo': "@{take(concat(coalesce(outputs('Org')?['name'], outputs('Site_title')), if(empty(outputs('Site_description')), '', concat('\\n', outputs('Site_description'))), if(empty(coalesce(outputs('Org')?['industry'], '')), '', concat('\\nIndustry: ', outputs('Org')?['industry'])), if(equals(outputs('Org')?['estimated_num_employees'], null), '', concat('\\nEmployees: ', string(outputs('Org')?['estimated_num_employees']))), if(empty(coalesce(outputs('Org')?['city'], outputs('Org')?['country'], '')), '', concat('\\nLocation: ', coalesce(outputs('Org')?['city'], ''), ' ', coalesce(outputs('Org')?['country'], ''))), if(empty(coalesce(outputs('Org')?['annual_revenue_printed'], '')), '', concat('\\nRevenue: ', outputs('Org')?['annual_revenue_printed'])), concat('\\nSource: ', outputs('Domain'))), 4000)}",
+        'item/Country': `@{coalesce(${E('Country')}, outputs('Org')?['country'], '')}`
+      }, { Found: ['Succeeded'] })
+    });
+};
+enrichFlow('leads', 'Lead');
+enrichFlow('accounts', 'Account');
+
+
+// 23 — Customer portal (served by the flow): sign-in by email link, my cases, case conversation, new case, knowledge base
+const Q_ = (k) => `triggerOutputs()?['queries']?['${k}']`;
+const PORTAL = Pi('portalUrl');
+const link = (pg, extra = '') => `${PORTAL}&p=${pg}&s=@{outputs('Token')}${extra}`;
+const ME = "outputs('Session')";
+const pform = (key) => ({ type: 'Query', inputs: { from: "@coalesce(triggerBody()?['$formdata'], createArray())", where: `@equals(item()?['key'], '${key}')` } });
+const pv = (key) => `trim(string(coalesce(first(body('F_${key}'))?['value'], '')))`;
+const nav = `<p class="m" style="margin-bottom:18px"><a href="${link('cases')}">My requests</a> · <a href="${link('new')}">New request</a> · <a href="${link('kb')}">Help articles</a> · <a href="${PORTAL}&p=login">Sign out</a></p>`;
+const redirect = (url, runAfter = {}) => ({ runAfter, type: 'Response', kind: 'Http', inputs: { statusCode: 303, headers: { Location: url, 'Cache-Control': 'no-store' } } });
+const ownsCase = `or(equals(body('Get_case')?['ContactRef'], ${ME}?['ID']), and(not(equals(${ME}?['AccountRef'], null)), equals(body('Get_case')?['AccountRef'], ${ME}?['AccountRef'])))`;
+flow('Brillienta CRM - Customer portal',
+  'Self-service portal for customers, served by this flow: sign in with a one-time email link, see the requests (cases) of their company, follow the conversation, reply, open new requests and search published help articles. Requires Power Automate Premium (HTTP trigger). Set the "Customer portal URL" variable to this flow\'s HTTP URL.',
+  ['sp', 'outlook'], ['site', 'page', 'support', 'portalUrl', 'casePrefix'],
+  { manual: { type: 'Request', kind: 'Http', inputs: { triggerAuthenticationType: 'All' } } },
+  {
+    Page: { runAfter: {}, type: 'Compose', inputs: `@{toLower(coalesce(${Q_('p')}, 'cases'))}` },
+    Token: { runAfter: {}, type: 'Compose', inputs: `@{replace(coalesce(${Q_('s')}, ''), '''', '')}` },
+    Is_post: { runAfter: {}, type: 'Compose', inputs: "@contains(toLower(string(coalesce(triggerOutputs()?['headers']?['Content-Type'], triggerOutputs()?['headers']?['content-type'], ''))), 'application/x-www-form-urlencoded')" },
+    F_email: { runAfter: {}, ...pform('email') }, F_subject: { runAfter: {}, ...pform('subject') }, F_description: { runAfter: {}, ...pform('description') },
+    F_impact: { runAfter: {}, ...pform('impact') }, F_message: { runAfter: {}, ...pform('message') },
+    Find_session: getItems('contacts', "@{if(empty(outputs('Token')), 'Id eq 0', concat('PortalToken eq ''', outputs('Token'), ''''))}", { Token: ['Succeeded'] }, 1),
+    Session: { runAfter: { Find_session: ['Succeeded'] }, type: 'Compose', inputs: "@first(body('Find_session')?['value'])" },
+    Signed_in: {
+      runAfter: { Session: ['Succeeded'], Page: ['Succeeded'], Is_post: ['Succeeded'], F_email: ['Succeeded'], F_subject: ['Succeeded'], F_description: ['Succeeded'], F_impact: ['Succeeded'], F_message: ['Succeeded'] },
+      type: 'If',
+      expression: { and: [{ not: { equals: [`@${ME}`, null] } }, { not: { equals: ["@outputs('Page')", 'login'] } }, { greater: [`@ticks(coalesce(${ME}?['PortalTokenExpires'], '2000-01-01T00:00:00Z'))`, '@ticks(utcNow())'] }] },
+      actions: {
+        Route: {
+          runAfter: {}, type: 'Switch', expression: "@outputs('Page')",
+          cases: {
+            Case_page: {
+              case: 'case',
+              actions: {
+                Get_case: api('sp', 'GetItem', { dataset: P('site'), table: LISTS.cases, id: `@int(coalesce(${Q_('id')}, '0'))` }),
+                Not_yours: htmlResponse(page('Not found', `${nav}<h1>Request not found</h1>`), { Get_case: ['Failed', 'TimedOut'] }),
+                Is_owner: {
+                  runAfter: { Get_case: ['Succeeded'] }, type: 'If', expression: { and: [{ equals: [`@${ownsCase}`, true] }] },
+                  actions: {
+                    Posted_reply: {
+                      runAfter: {}, type: 'If', expression: { and: [{ equals: ["@outputs('Is_post')", true] }, { not: { equals: [`@${pv('message')}`, ''] } }] },
+                      actions: {
+                        Add_reply: api('sp', 'PostItem', {
+                          dataset: P('site'), table: LISTS.acts, 'item/Title': `@{take(concat('Received: ', body('Get_case')?['Title']), 255)}`,
+                          'item/Details': `From: @{${ME}?['Title']} <@{${ME}?['Email']}> (customer portal)\n\n@{take(${pv('message')}, 8000)}`,
+                          'item/ActivityType/Value': 'Email', 'item/RelatedType': 'Case', 'item/RelatedId': "@body('Get_case')?['ID']", 'item/Completed': true,
+                          'item/DueDate': '@utcNow()', 'item/ActivitySource/Value': 'Website'
+                        }),
+                        Reopen_case: {
+                          runAfter: { Add_reply: ['Succeeded'] }, type: 'If', expression: { and: [{ contains: ["@createArray('Resolved', 'Closed', 'Waiting on customer')", "@body('Get_case')?['CaseStatus']?['Value']"] }] },
+                          actions: { Set_in_progress: api('sp', 'PatchItem', { dataset: P('site'), table: LISTS.cases, id: "@body('Get_case')?['ID']", 'item/Title': "@body('Get_case')?['Title']", 'item/CaseStatus/Value': 'In progress' }) },
+                          else: { actions: {} }
+                        },
+                        Tell_agent: email(`@{coalesce(body('Get_case')?['CaseOwner']?['Email'], ${P('support').slice(1)})}`, "Customer replied in the portal: @{body('Get_case')?['CaseNumber']}",
+                          html("New portal reply on @{body('Get_case')?['CaseNumber']}", `<p>@{${H(pv('message'))}}</p>`), { Add_reply: ['Succeeded'] }),
+                        After_reply: redirect(`${link('case', "&id=@{body('Get_case')?['ID']}")}`, { Tell_agent: ['Succeeded', 'Failed'] })
+                      },
+                      else: {
+                        actions: {
+                          Conversation: getItems('acts', "RelatedType eq 'Case' and RelatedId eq @{body('Get_case')?['ID']} and ActivityType eq 'Email'", {}, 200),
+                          Messages: {
+                            runAfter: { Conversation: ['Succeeded'] }, type: 'Select',
+                            inputs: { from: "@body('Conversation')?['value']", select: `@concat('<div class="done" style="margin:8px 0;background:', if(startsWith(coalesce(item()?['Title'], ''), 'Received'), '#f3f6fa', '#e6f4ee'), '"><b>', if(startsWith(coalesce(item()?['Title'], ''), 'Received'), 'You', 'Support'), '</b> <span class="m">', formatDateTime(coalesce(item()?['DueDate'], item()?['Created']), 'd MMM yyyy HH:mm'), '</span><div style="white-space:pre-wrap;margin-top:6px">', ${H("item()?['Details']")}, '</div></div>')` }
+                          },
+                          Case_view: htmlResponse(page('Request', `${nav}<h1>@{${H("body('Get_case')?['CaseNumber']")}} · @{${H("body('Get_case')?['Title']")}}</h1>
+<p class="m">Status: <b>@{body('Get_case')?['CaseStatus']?['Value']}</b> · Priority: @{body('Get_case')?['Priority']?['Value']} · Opened @{formatDateTime(body('Get_case')?['Created'], 'd MMM yyyy')}</p>
+@{if(empty(coalesce(body('Get_case')?['Description'], '')), '', concat('<div class="terms">', ${H("body('Get_case')?['Description']")}, '</div>'))}
+@{if(empty(coalesce(body('Get_case')?['Resolution'], '')), '', concat('<p><b>Resolution</b></p><div class="done" style="white-space:pre-wrap">', ${H("body('Get_case')?['Resolution']")}, '</div>'))}
+<h2 style="font-size:16px;margin-top:22px">Conversation</h2>@{join(body('Messages'), '')}
+<form method="post" action=""><label for="m">Reply</label><textarea id="m" name="message" rows="4" required maxlength="8000"></textarea><div class="btns"><button class="ok" type="submit">Send reply</button></div></form>`), { Messages: ['Succeeded'] })
+                        }
+                      }
+                    }
+                  },
+                  else: { actions: { Not_owner: htmlResponse(page('Not found', `${nav}<h1>Request not found</h1>`)) } }
+                }
+              }
+            },
+            New_page: {
+              case: 'new',
+              actions: {
+                Posted_case: {
+                  runAfter: {}, type: 'If', expression: { and: [{ equals: ["@outputs('Is_post')", true] }, { not: { equals: [`@${pv('subject')}`, ''] } }] },
+                  actions: {
+                    Create_portal_case: api('sp', 'PostItem', {
+                      dataset: P('site'), table: LISTS.cases, 'item/Title': `@{take(${pv('subject')}, 255)}`, 'item/Description': `@{take(${pv('description')}, 60000)}`,
+                      'item/Priority/Value': `@{if(contains(createArray('Low', 'Normal', 'High', 'Critical'), ${pv('impact')}), ${pv('impact')}, 'Normal')}`,
+                      'item/CaseStatus/Value': 'New', 'item/Origin/Value': 'Portal', 'item/Category/Value': 'Question',
+                      'item/ContactRef': `@${ME}?['ID']`, 'item/AccountRef': `@${ME}?['AccountRef']`, 'item/RequesterEmail': `@{${ME}?['Email']}`
+                    }),
+                    Number_case: api('sp', 'PatchItem', {
+                      dataset: P('site'), table: LISTS.cases, id: "@body('Create_portal_case')?['ID']", 'item/Title': "@body('Create_portal_case')?['Title']",
+                      'item/CaseNumber': `@{concat(${P('casePrefix').slice(1)}, '-', formatDateTime(utcNow(), 'yyyy'), '-', formatNumber(body('Create_portal_case')?['ID'], '0000'))}`
+                    }, { Create_portal_case: ['Succeeded'] }),
+                    Alert_new_case: email(P('support'), "New portal request: @{body('Create_portal_case')?['Title']}",
+                      html('New request from the customer portal', `<table>${tr('From', `@{${H(`${ME}?['Title']`)}} &lt;@{${ME}?['Email']}&gt;`)}${tr('Subject', `@{${H("body('Create_portal_case')?['Title']")}}`)}</table>`), { Number_case: ['Succeeded', 'Failed'] }),
+                    After_create: redirect(`${link('case', "&id=@{body('Create_portal_case')?['ID']}")}`, { Alert_new_case: ['Succeeded', 'Failed'] })
+                  },
+                  else: {
+                    actions: {
+                      New_form: htmlResponse(page('New request', `${nav}<h1>New request</h1><form method="post" action="">
+<label for="s">Subject</label><input type="text" id="s" name="subject" required maxlength="200">
+<label for="d">Describe the problem or question</label><textarea id="d" name="description" rows="6" maxlength="20000"></textarea>
+<label for="i">How urgent is it?</label><select id="i" name="impact" style="padding:9px;border-radius:6px;border:1px solid #bbb"><option value="Low">Low – minor or cosmetic</option><option value="Normal" selected>Normal</option><option value="High">High – some people cannot work</option><option value="Critical">Critical – everyone is blocked</option></select>
+<div class="btns"><button class="ok" type="submit">Submit request</button></div></form>`))
+                    }
+                  }
+                }
+              }
+            },
+            Kb_page: {
+              case: 'kb',
+              actions: {
+                Search_text: { runAfter: {}, type: 'Compose', inputs: `@{replace(trim(coalesce(${Q_('q')}, '')), '''', '''''')}` },
+                Articles: getItems('articles', "@{if(empty(outputs('Search_text')), 'ArticleStatus eq ''Published''', concat('ArticleStatus eq ''Published'' and (substringof(''', outputs('Search_text'), ''', Title) or substringof(''', outputs('Search_text'), ''', Keywords))'))}", { Search_text: ['Succeeded'] }, 50),
+                Article_list: {
+                  runAfter: { Articles: ['Succeeded'] }, type: 'Select',
+                  inputs: { from: "@body('Articles')?['value']", select: `@concat('<details style="margin:8px 0"><summary style="cursor:pointer;font-weight:600">', ${H("item()?['Title']")}, '</summary><div class="terms" style="margin-top:6px">', ${H("item()?['Body']")}, '</div></details>')` }
+                },
+                Kb_view: htmlResponse(page('Help articles', `${nav}<h1>Help articles</h1><form method="get" action=""><input type="hidden" name="p" value="kb"><input type="hidden" name="s" value="@{outputs('Token')}"><input type="text" name="q" placeholder="Search" value="@{${H(Q_('q'))}}"></form>
+@{if(empty(body('Article_list')), '<p class="m">No articles found.</p>', join(body('Article_list'), ''))}`), { Article_list: ['Succeeded'] })
+              }
+            }
+          },
+          default: {
+            actions: {
+              Account_filter: { runAfter: {}, type: 'Compose', inputs: `@{if(equals(${ME}?['AccountRef'], null), concat('ContactRef eq ', string(${ME}?['ID'])), concat('ContactRef eq ', string(${ME}?['ID']), ' or AccountRef eq ', string(${ME}?['AccountRef'])))}` },
+              My_cases: getItems('cases', "@{outputs('Account_filter')}", { Account_filter: ['Succeeded'] }, 200),
+              Case_rows: {
+                runAfter: { My_cases: ['Succeeded'] }, type: 'Select',
+                inputs: { from: "@body('My_cases')?['value']", select: `@concat('<tr><td><a href="${PORTAL}&p=case&s=', outputs('Token'), '&id=', string(item()?['ID']), '">', ${H("coalesce(item()?['CaseNumber'], string(item()?['ID']))")}, '</a></td><td>', ${H("item()?['Title']")}, '</td><td>', coalesce(item()?['CaseStatus']?['Value'], ''), '</td><td class="n">', formatDateTime(item()?['Modified'], 'd MMM yyyy'), '</td></tr>')` }
+              },
+              Touch_login: api('sp', 'PatchItem', { dataset: P('site'), table: LISTS.contacts, id: `@${ME}?['ID']`, 'item/Title': `@${ME}?['Title']`, 'item/PortalLastLogin': '@utcNow()' }),
+              Cases_view: htmlResponse(page('My requests', `${nav}<h1>Hello @{${H(`${ME}?['FirstName']`)}}</h1>
+<p class="m">Requests from you@{if(equals(${ME}?['AccountRef'], null), '', ' and your colleagues')}.</p>
+<table><thead><tr><th>Ref</th><th>Subject</th><th>Status</th><th class="n">Updated</th></tr></thead><tbody>@{join(body('Case_rows'), '')}</tbody></table>
+@{if(empty(body('Case_rows')), '<p class="m">No requests yet.</p>', '')}<div class="btns"><a class="ok" style="padding:10px 18px;border-radius:6px;text-decoration:none" href="${link('new')}">New request</a></div>`), { Case_rows: ['Succeeded'] })
+            }
+          }
+        }
+      },
+      else: {
+        actions: {
+          Login_post: {
+            runAfter: {}, type: 'If', expression: { and: [{ equals: ["@outputs('Is_post')", true] }, { contains: [`@${pv('email')}`, '@'] }] },
+            actions: {
+              Find_contact_by_email: getItems('contacts', `Email eq '@{replace(toLower(${pv('email')}), '''', '''''')}'`, {}, 1),
+              Known_contact: {
+                runAfter: { Find_contact_by_email: ['Succeeded'] }, type: 'If', expression: { and: [{ greater: ["@length(body('Find_contact_by_email')?['value'])", 0] }] },
+                actions: {
+                  New_token: { runAfter: {}, type: 'Compose', inputs: "@{concat(replace(guid(), '-', ''), replace(guid(), '-', ''))}" },
+                  Save_token: api('sp', 'PatchItem', {
+                    dataset: P('site'), table: LISTS.contacts, id: "@first(body('Find_contact_by_email')?['value'])?['ID']", 'item/Title': "@first(body('Find_contact_by_email')?['value'])?['Title']",
+                    'item/PortalToken': "@{outputs('New_token')}", 'item/PortalTokenExpires': '@{addDays(utcNow(), 7)}'
+                  }, { New_token: ['Succeeded'] }),
+                  Send_link: email("@{first(body('Find_contact_by_email')?['value'])?['Email']}", 'Your sign-in link',
+                    `<html><head>${STYLE}</head><body><p style="font-size:18px;font-weight:600;color:#008D62">Sign in to the customer portal</p><p><a class="btn" href="${PORTAL}&p=cases&s=@{outputs('New_token')}">Open my requests</a></p><p style="color:#888;font-size:12px">The link works for 7 days. If you did not ask for it, you can ignore this email.</p></body></html>`,
+                    { Save_token: ['Succeeded'] })
+                },
+                else: { actions: {} }
+              },
+              Check_email: htmlResponse(page('Check your email', '<h1>Check your email</h1><div class="done">If this address is registered with us, we have sent you a sign-in link. It works for 7 days.</div>'), { Known_contact: ['Succeeded', 'Failed'] })
+            },
+            else: {
+              actions: {
+                Login_form: htmlResponse(page('Customer portal', `<h1>Customer portal</h1><p class="m">Follow your support requests, reply to our team and open new requests.</p>
+<form method="post" action="${PORTAL}&p=login"><label for="e">Your work email</label><input type="text" id="e" name="email" required autocomplete="email"><div class="btns"><button class="ok" type="submit">Email me a sign-in link</button></div></form>`))
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
 // ------------------------------------------------------------------ validation
 function validate(f) {
   const errors = [];
@@ -1145,6 +1444,8 @@ function validate(f) {
       Object.keys(a.runAfter || {}).forEach(r => { if (!(r in actions)) { errors.push(`${k}: runAfter "${r}" not in same scope (${scope})`); } });
       if (a.actions) { walk(a.actions, k); }
       if (a.else && a.else.actions) { walk(a.else.actions, `${k}/else`); }
+      if (a.cases) { Object.keys(a.cases).forEach(c => walk(a.cases[c].actions, `${k}/${c}`)); }
+      if (a.default && a.default.actions) { walk(a.default.actions, `${k}/default`); }
     });
   };
   walk(f.actions, 'root');

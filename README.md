@@ -2,6 +2,20 @@
 
 A complete CRM delivered as one SharePoint Framework (SPFx 1.24) web part. All data is stored in SharePoint lists **in the customer's own Microsoft 365 tenant**. There is no external database or server.
 
+## What's new in 3.0
+
+* **Multi-currency and price books:** each deal, quote, invoice and subscription has its own currency, while dashboards, forecasts, reports and grid totals convert to the company currency (Settings › Company › Currencies). Price books (for example "Partners EUR") set a quote's currency and prices, with specific prices per product or a discount on the converted list price.
+* **Territories and teams:** teams have a manager, members and countries. New leads are routed round-robin within their territory team, including leads arriving from flows. The Forecast can be filtered by team and has a per-team rollup, and the Dashboard has a "Team" scope.
+* **Record-level security in SharePoint:** optionally, every lead, account, contact, deal, quote, case, subscription and invoice gets its own permissions. Access goes to the owner, the owner's team manager, team members (read or edit), and the CRM groups, so reps can't reach other reps' records anywhere in Microsoft 365. Administrators apply it in one click; the *Record security* flow keeps it up to date.
+* **Offline:** lists are kept on the device. With no connection, the CRM still opens from the saved session, shows the saved data, and queues edits and new records (including follow-up activities). These are sent in order when the connection returns, and new records get their real IDs. Deleting is disabled while offline.
+* **Languages:** English, Deutsch, Français, Español and हिन्दी, chosen per user (the default follows the SharePoint language). Navigation, record types, fields, sections, choices, statuses, commands and buttons are translated. Dashboards, settings and messages are still in English.
+* **Lead enrichment:** new leads with a business email get their website and company name at once. The *Lead / Account enrichment* flows then read the company website (name, description, LinkedIn page) and, with an Apollo.io key, add industry, size, location and revenue.
+* **Customer portal:** customers sign in with an email link and see their company's requests. They can follow and reply to the conversation (which reopens resolved cases), open new requests, and search published knowledge articles. Contacts get an "Invite to portal" command.
+* **Outlook add-in** (`outlook-addin/`): shows the sender's contact or lead with open deals and cases, logs the email to their timeline (no duplicates with Outlook sync), and creates a lead for unknown senders. It's hosted at brillienta.com/crm-addin.
+* **AppSource transactable SaaS** (BrillientaWebSite): a landing page and fulfillment webhook that activate subscriptions, issue and email tenant-bound licence keys, handle plan and seat changes and renewals, and record each sale in Brillienta's CRM.
+
+Upgrading from 2.x: deploy the `.sppkg`, click **Update lists** (adds the new columns), then re-import the flow pack (2.0, 23 flows). Then paste the *Customer portal* flow URL into the flow's own "Customer portal URL" variable and into Settings › Company.
+
 ## What's new in 2.2
 
 * **Sales sequences:** timed emails, calls, WhatsApp messages and tasks for leads and contacts. Email steps are sent automatically or with one click, and a reply stops the sequence.
@@ -62,7 +76,8 @@ Upgrading from 2.0: deploy the new `.sppkg`, open the CRM as an administrator an
 | **AppSource / Partner Center** | HTTPS endpoint → Power Automate → leads list (see below) |
 | **Webhooks** | 27 events (`lead.created`, `opportunity.won`, `case.created`, …) to Power Automate, Logic Apps, Zapier, Make, n8n or your own API |
 | **Data** | CSV import/export (Excel, HubSpot, Salesforce, Dynamics exports) · full JSON backup |
-| **Power Automate flow pack** | 20 ready-made flows as an importable solution (`flows/dist/BrillientaCRMFlows_1_5_0_0.zip`, also downloadable from Settings › Integrations): AppSource lead intake, website leads/demos/support, new lead alert, daily digest, overdue reminders, case SLA escalation, deal-won handoff, quote discount approval, **quote e-signature**, **email to case**, **Razorpay/Stripe payment link and payment received**, **WhatsApp send/inbound**, **case satisfaction survey**, **unsubscribe**, **inbound API**. See `flows/README.md` |
+| **Power Automate flow pack** | 23 ready-made flows as an importable solution (`flows/dist/BrillientaCRMFlows_2_0_0_0.zip`, also downloadable from Settings › Integrations): AppSource lead intake, website leads/demos/support, new lead alert, daily digest, overdue reminders, case SLA escalation, deal-won handoff, quote discount approval, **quote e-signature**, **email to case**, **Razorpay/Stripe payment link and payment received**, **WhatsApp send/inbound**, **case satisfaction survey**, **unsubscribe**, **inbound API**, **record security**, **lead/account enrichment**, **customer portal**. See `flows/README.md` |
+| **Outlook add-in** | `outlook-addin/`: sender lookup, track email, create lead, open deals and cases, in Outlook desktop, web and mobile. See `outlook-addin/README.md` |
 
 ## Enterprise features
 
@@ -94,6 +109,11 @@ src/webparts/brillientaCrm/
   services/CopilotAgent.ts      Microsoft 365 Copilot declarative agent package
   services/WhatsApp.ts          WhatsApp numbers, click-to-chat, Cloud API queue
   services/FlowPackage.ts       Power Automate solution zip, built in the browser
+  services/OfflineStore.ts      IndexedDB copy of lists, offline edit queue
+  services/Enrichment.ts        lead/account enrichment (domain → website/company)
+  services/Marketing.ts         email campaigns, unsubscribe links, audience export
+  i18n/                         UI languages (index.ts) and translation table (table.ts)
+outlook-addin/                  Outlook add-in (manifest.xml + web/ task pane)
   components/core/              generic grid, record panel, fields, charts, dialogs, quote editor
   components/pages/             dashboard, my work, calendar, forecast, reports, settings, audit, setup
 tools/license/                  key generation and licence issuing (vendor-only, not shipped)

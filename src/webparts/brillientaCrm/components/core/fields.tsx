@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { tr } from '../../i18n';
 import * as React from 'react';
 import { Checkbox, Dropdown, Link, SpinButton, TagPicker, TextField, ITag, Label, Icon, Position } from '@fluentui/react';
 import { IFieldDef, IRecord } from '../../models/model';
@@ -16,6 +17,9 @@ export function choicesFor(fd: IFieldDef, s: ICrmSettings, current?: string): st
     case 'industries': list = s.industries; break;
     case 'caseCategories': list = s.caseCategories; break;
     case 'lostReasons': list = s.lostReasons; break;
+    case 'currencies': list = [s.currency, ...(s.currencies || []).map(c => c.code).filter(c => c && c !== s.currency)]; break;
+    case 'priceBooks': list = (s.priceBooks || []).filter(b => b.active).map(b => b.name); break;
+    case 'teams': list = (s.teams || []).map(t => t.name); break;
   }
   return current && list.indexOf(current) < 0 ? [current, ...list] : list;
 }
@@ -29,7 +33,7 @@ export function renderValue(fd: IFieldDef, r: IRecord, engine: Engine, currency:
     return fd.type === 'boolean' ? 'No' : '';
   }
   switch (fd.type) {
-    case 'currency': return fmtMoney(Number(v), currency);
+    case 'currency': return fmtMoney(Number(v), fd.key === 'amountBase' || !r?.currency ? currency : r.currency);
     case 'percent': return `${v}%`;
     case 'number': return fd.key === 'leadScore' ? <ScoreBadge score={Number(v)} /> : Number(v).toLocaleString();
     case 'date': return compact ? fmtShort(v, false) : fmtDate(v);
@@ -68,8 +72,8 @@ export function textValue(fd: IFieldDef, r: IRecord, engine: Engine): string {
   }
 }
 
-export const FieldEditor: React.FC<{ fd: IFieldDef; value: any; onChange: (v: any) => void; disabled?: boolean; error?: string }> =
-  ({ fd, value, onChange, disabled, error }) => {
+export const FieldEditor: React.FC<{ fd: IFieldDef; value: any; onChange: (v: any) => void; disabled?: boolean; error?: string; currencyCode?: string }> =
+  ({ fd, value, onChange, disabled, error, currencyCode }) => {
     const { settings, engine } = useCrm();
     const ro = disabled || fd.readOnly;
     if (fd.readOnly && !disabled) {
@@ -89,13 +93,13 @@ export const FieldEditor: React.FC<{ fd: IFieldDef; value: any; onChange: (v: an
       case 'choice': {
         const opts = choicesFor(fd, settings, value);
         return <Dropdown label={fd.label} selectedKey={value || ''} disabled={ro} required={fd.required} errorMessage={error}
-          options={[...(fd.required ? [] : [{ key: '', text: '—' }]), ...opts.map(o => ({ key: o, text: o }))]} onChange={(_, o) => onChange(o?.key ? String(o.key) : '')} />;
+          options={[...(fd.required ? [] : [{ key: '', text: '—' }]), ...opts.map(o => ({ key: o, text: tr(o) }))]} onChange={(_, o) => onChange(o?.key ? String(o.key) : '')} />;
       }
       case 'number':
         return <TextField label={fd.label} type="number" value={value === undefined || value === null ? '' : String(value)} disabled={ro} required={fd.required} errorMessage={error}
           onChange={(_, v) => onChange(v === '' || v === undefined ? undefined : Number(v))} />;
       case 'currency':
-        return <TextField label={`${fd.label} (${settings.currency})`} type="number" min={0} step="0.01" value={value === undefined || value === null ? '' : String(value)} disabled={ro}
+        return <TextField label={`${fd.label} (${fd.key === 'amountBase' ? settings.currency : currencyCode || settings.currency})`} type="number" min={0} step="0.01" value={value === undefined || value === null ? '' : String(value)} disabled={ro}
           required={fd.required} errorMessage={error} onChange={(_, v) => onChange(v === '' || v === undefined ? undefined : Number(v))} />;
       case 'percent':
         return <SpinButton label={`${fd.label} (%)`} labelPosition={Position.top} min={0} max={100} step={5} value={String(value ?? 0)} disabled={ro}

@@ -15,8 +15,9 @@ const ProductCombo: React.FC<{ options: IComboBoxOption[]; text: string; product
     );
   };
 
-export const QuoteLines: React.FC<{ items: ILineItem[]; onChange: (items: ILineItem[]) => void; disabled?: boolean }> = ({ items, onChange, disabled }) => {
-  const { currency } = useCrm();
+export const QuoteLines: React.FC<{ items: ILineItem[]; onChange: (items: ILineItem[]) => void; disabled?: boolean; priceBook?: string; currencyCode?: string }> = ({ items, onChange, disabled, priceBook, currencyCode }) => {
+  const { currency: baseCurrency, engine } = useCrm();
+  const currency = currencyCode || baseCurrency;
   const { rows } = useEntities('products');
   const products = rows('products').filter(p => p.active !== false);
   const opts: IComboBoxOption[] = products.map(p => ({ key: p.id!, text: `${p.title}${p.sku ? ` (${p.sku})` : ''}` }));
@@ -25,7 +26,7 @@ export const QuoteLines: React.FC<{ items: ILineItem[]; onChange: (items: ILineI
   const pick = (i: number, key?: string | number, text?: string): void => {
     const p = products.find(x => x.id === Number(key));
     if (p) {
-      set(i, { productId: p.id, name: p.title || '', unitPrice: Number(p.unitPrice) || 0, taxPct: Number(p.taxRate) || 0, billing: p.billingCycle, description: p.description });
+      set(i, { productId: p.id, name: p.title || '', unitPrice: engine.priceFor(p, priceBook, currency), taxPct: Number(p.taxRate) || 0, billing: p.billingCycle, description: p.description });
     } else if (text) {
       set(i, { productId: undefined, name: text });
     }
@@ -72,7 +73,7 @@ export function quoteHtml(q: IRecord, engine: Engine): string {
   const isInv = !!q.invoiceNumber;
   const number = isInv ? q.invoiceNumber : q.quoteNumber;
   const c = s.company;
-  const cur = s.currency;
+  const cur = q.currency || s.currency;
   const money = (n: number): string => esc(fmtMoney(n, cur));
   const acc = engine.find('accounts', q.accountRef);
   const con = engine.find('contacts', q.contactRef);

@@ -7,7 +7,7 @@ import {
 import { downloadFlowPack, IFlowPackInfo, loadFlowPack } from '../../services/FlowPackage';
 import { ENTITIES, EntityKey, FieldType } from '../../models/model';
 import { ICrmSettings, ICustomField, IStageDef, IWebhook, WEBHOOK_EVENTS } from '../../models/settings';
-import { useCrm } from '../CrmContext';
+import { useCrm, useEntities } from '../CrmContext';
 import { UserPicker } from '../core/controls';
 import { errorText, uid } from '../utils';
 import { Card } from './Dashboard';
@@ -58,7 +58,7 @@ const FlowPackDialog: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     return undefined;
   };
   // Payment API keys are never typed into the browser: they are entered in Power Automate after import.
-  const isSecret = (schema: string): boolean => /razorpay|stripe|whatsapp|apikey/i.test(schema);
+  const isSecret = (schema: string): boolean => /razorpay|stripe|whatsapp|apikey|apollo|portalurl/i.test(schema);
   const shown = (pack?.env || []).filter(e => !isSecret(e.schema));
   const anyInvalid = !pack || shown.some(e => !!invalid(e.schema, values[e.schema] || ''));
   const download = (): void => {
@@ -100,6 +100,63 @@ const FlowPackDialog: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         <DefaultButton text={done ? 'Close' : 'Cancel'} onClick={onClose} />
       </DialogFooter>
     </Dialog>
+  );
+};
+
+/** Exchange rates and price books (Settings › Company). */
+const CurrencyCards: React.FC<{ s: ICrmSettings; upd: (patch: Partial<ICrmSettings>) => void }> = ({ s, upd }) => {
+  const { rows } = useEntities('products');
+  const products = rows('products').filter(p => p.active !== false);
+  const [open, setOpen] = React.useState<string>();
+  const codes = [s.currency, ...s.currencies.map(c => c.code)];
+  return (
+    <>
+      <Card title="Currencies">
+        <Text variant="small" className="crm-muted" block>Company currency: <b>{s.currency}</b>. Deals, quotes, invoices and subscriptions can use any currency below; dashboards, forecasts and reports convert to {s.currency}.</Text>
+        {s.currencies.map((c, i) => (
+          <Stack key={i} horizontal verticalAlign="end" tokens={{ childrenGap: 8 }} style={{ marginTop: 6 }}>
+            <TextField label={i ? undefined : 'Currency'} ariaLabel="Currency code" value={c.code} placeholder="EUR" styles={{ root: { width: 90 } }}
+              onChange={(_, v) => upd({ currencies: s.currencies.map((x, j) => (j === i ? { ...x, code: (v || '').toUpperCase().slice(0, 3) } : x)) })} />
+            <TextField label={i ? undefined : `1 unit = ? ${s.currency}`} ariaLabel="Rate" type="number" value={String(c.rate)} styles={{ root: { width: 150 } }}
+              onChange={(_, v) => upd({ currencies: s.currencies.map((x, j) => (j === i ? { ...x, rate: Number(v) || 0 } : x)) })} />
+            <IconButton iconProps={{ iconName: 'Delete' }} ariaLabel="Remove currency" onClick={() => upd({ currencies: s.currencies.filter((_, j) => j !== i) })} />
+          </Stack>
+        ))}
+        <DefaultButton iconProps={{ iconName: 'Add' }} text="Add currency" styles={{ root: { marginTop: 8 } }} onClick={() => upd({ currencies: [...s.currencies, { code: '', rate: 1 }] })} />
+      </Card>
+      <Card title="Price books" wide>
+        <Text variant="small" className="crm-muted" block>A price book sets the currency and prices of a quote (e.g. “Partners EUR”, “Education INR”). Products without a specific price use the list price converted to the book currency, minus the book discount.</Text>
+        {s.priceBooks.map((b, i) => {
+          const setB = (patch: Partial<typeof b>): void => upd({ priceBooks: s.priceBooks.map((x, j) => (j === i ? { ...x, ...patch } : x)) });
+          return (
+            <div key={b.id} className="crm-wa-tpl" style={{ marginTop: 8 }}>
+              <Stack horizontal wrap verticalAlign="end" tokens={{ childrenGap: 8 }}>
+                <TextField label="Price book" value={b.name} onChange={(_, v) => setB({ name: v || '' })} styles={{ root: { width: 200 } }} />
+                <Dropdown label="Currency" selectedKey={b.currency} options={codes.filter(Boolean).map(c => ({ key: c, text: c }))} onChange={(_, o) => setB({ currency: String(o?.key) })} styles={{ root: { width: 100 } }} />
+                <TextField label="Discount on list %" type="number" value={String(b.discountPct)} onChange={(_, v) => setB({ discountPct: Math.max(0, Math.min(100, Number(v) || 0)) })} styles={{ root: { width: 130 } }} />
+                <Toggle label="Active" inlineLabel checked={b.active} onChange={(_, c) => setB({ active: !!c })} />
+                <DefaultButton text={open === b.id ? 'Hide prices' : `Prices (${Object.keys(b.prices).filter(k => b.prices[k] !== undefined).length})`} onClick={() => setOpen(open === b.id ? undefined : b.id)} />
+                <IconButton iconProps={{ iconName: 'Delete' }} ariaLabel="Remove price book" onClick={() => upd({ priceBooks: s.priceBooks.filter((_, j) => j !== i) })} />
+              </Stack>
+              {open === b.id && (
+                <div className="crm-sla-table" style={{ marginTop: 8 }}>
+                  <Text variant="small" className="crm-muted">Product</Text><Text variant="small" className="crm-muted">List ({s.currency})</Text><Text variant="small" className="crm-muted">Price ({b.currency})</Text>
+                  {products.map(p => (
+                    <React.Fragment key={p.id}>
+                      <Text>{p.title}</Text><Text>{p.unitPrice}</Text>
+                      <TextField ariaLabel={`${p.title} price`} type="number" placeholder="auto" value={b.prices[String(p.id)] === undefined ? '' : String(b.prices[String(p.id)])}
+                        onChange={(_, v) => { const prices = { ...b.prices }; if (v === '' || v === undefined) { delete prices[String(p.id)]; } else { prices[String(p.id)] = Number(v); } setB({ prices }); }} />
+                    </React.Fragment>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        <DefaultButton iconProps={{ iconName: 'Add' }} text="New price book" styles={{ root: { marginTop: 8 } }}
+          onClick={() => upd({ priceBooks: [...s.priceBooks, { id: `pb${Date.now()}`, name: 'New price book', currency: s.currency, discountPct: 0, prices: {}, active: true }] })} />
+      </Card>
+    </>
   );
 };
 
@@ -285,10 +342,14 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
                 <TextField label="Satisfaction survey link (HTTP URL of the flow “Case satisfaction survey”)" value={s.service.surveyUrl} placeholder="https://…"
                   errorMessage={s.service.surveyUrl && !/^https:\/\//i.test(s.service.surveyUrl) ? 'Must start with https://' : undefined}
                   onChange={(_, v) => upd({ service: { ...s.service, surveyUrl: (v || '').trim() } })} />
+                <TextField label="Customer portal link (HTTP URL of the flow “Customer portal”)" value={s.service.portalUrl} placeholder="https://…"
+                  errorMessage={s.service.portalUrl && !/^https:\/\//i.test(s.service.portalUrl) ? 'Must start with https://' : undefined}
+                  onChange={(_, v) => upd({ service: { ...s.service, portalUrl: (v || '').trim() } })} />
                 <Toggle label="Email a 1–5 survey when a case is resolved" inlineLabel checked={s.service.surveyOnResolve} onChange={(_, v) => upd({ service: { ...s.service, surveyOnResolve: !!v } })} />
                 <TextField label="Case number prefix" value={s.casePrefix} onChange={(_, v) => upd({ casePrefix: v || 'CS' })} />
               </Stack>
             </Card>
+            <CurrencyCards s={s} upd={upd} />
             <Card title="Invoices & subscriptions">
               <Stack tokens={{ childrenGap: 8 }}>
                 <TextField label="Invoice number prefix" value={s.invoice.prefix} onChange={(_, v) => upd({ invoice: { ...s.invoice, prefix: v || 'INV' } })} />
@@ -378,6 +439,41 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
               ))}
               <UserPicker showMe={false} onChange={u => { if (u && !s.assignment.roundRobin.some(x => x.id === u.id)) { upd({ assignment: { ...s.assignment, roundRobin: [...s.assignment.roundRobin, u] } }); } }} />
               <Text variant="small" className="crm-muted" block>Leads created in the CRM are assigned on save. Marketplace leads arriving via Power Automate can be distributed with “Round-robin assign” in the Leads grid.</Text>
+            </Card>
+            <Card title="Teams & territories" wide>
+              <Text variant="small" className="crm-muted" block>
+                New leads from a team&apos;s countries are assigned round-robin within that team (before the general round-robin). Dashboards and the forecast can be filtered by team; managers see their team&apos;s numbers.
+              </Text>
+              {s.teams.map((t, i) => {
+                const setT = (patch: Partial<typeof t>): void => upd({ teams: s.teams.map((x, j) => (j === i ? { ...x, ...patch } : x)) });
+                return (
+                  <div key={t.id} className="crm-wa-tpl" style={{ marginTop: 8 }}>
+                    <Stack horizontal wrap verticalAlign="end" tokens={{ childrenGap: 10 }}>
+                      <TextField label="Team" value={t.name} onChange={(_, v) => setT({ name: v || '' })} styles={{ root: { width: 180 } }} />
+                      <TextField label="Territories (countries)" value={t.territories.join(', ')} placeholder="India, UAE, Saudi Arabia" styles={{ root: { width: 300 } }}
+                        onChange={(_, v) => setT({ territories: (v || '').split(',').map(x => x.trim()).filter(Boolean) })} />
+                      <IconButton iconProps={{ iconName: 'Delete' }} ariaLabel="Remove team" onClick={() => upd({ teams: s.teams.filter((_, j) => j !== i) })} />
+                    </Stack>
+                    <Stack horizontal wrap tokens={{ childrenGap: 16 }} style={{ marginTop: 6 }}>
+                      <Stack tokens={{ childrenGap: 4 }} styles={{ root: { minWidth: 220 } }}>
+                        <Label>Manager</Label>
+                        {t.manager ? <Stack horizontal verticalAlign="center"><Text style={{ flex: 1 }}>{t.manager.title}</Text><IconButton iconProps={{ iconName: 'Cancel' }} ariaLabel="Remove manager" onClick={() => setT({ manager: undefined })} /></Stack>
+                          : <UserPicker showMe={false} onChange={u => { if (u) { setT({ manager: u }); } }} />}
+                      </Stack>
+                      <Stack tokens={{ childrenGap: 4 }} styles={{ root: { minWidth: 260 } }}>
+                        <Label>Members</Label>
+                        {t.members.map(m => (
+                          <Stack key={m.id} horizontal verticalAlign="center"><Text style={{ flex: 1 }}>{m.title}</Text>
+                            <IconButton iconProps={{ iconName: 'Cancel' }} ariaLabel={`Remove ${m.title}`} onClick={() => setT({ members: t.members.filter(x => x.id !== m.id) })} /></Stack>
+                        ))}
+                        <UserPicker showMe={false} onChange={u => { if (u && !t.members.some(x => x.id === u.id)) { setT({ members: [...t.members, u] }); } }} />
+                      </Stack>
+                    </Stack>
+                  </div>
+                );
+              })}
+              <DefaultButton iconProps={{ iconName: 'Add' }} text="New team" styles={{ root: { marginTop: 8 } }}
+                onClick={() => upd({ teams: [...s.teams, { id: `team${Date.now()}`, name: 'New team', members: [], territories: [], lastIndex: -1 }] })} />
             </Card>
             <Card title="Sales sequences" wide>
               <Text variant="small" className="crm-muted" block>
@@ -672,6 +768,31 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
                 {!engine.hasFeature('security') && <Text variant="small">Requires the Enterprise plan.</Text>}
                 <Text variant="small" className="crm-muted">Then add people to the groups in <Link href={`${engine.ds.rest.webUrl}/_layouts/15/groups.aspx`} target="_blank">Site permissions › Groups</Link>. Existing site permissions are kept.</Text>
               </Stack>
+            </Card>
+            <Card title="Record-level security (SharePoint)" wide>
+              <Text variant="small" block>
+                When on, every lead, account, contact, deal, quote, case, subscription and invoice gets its own SharePoint permissions: its <b>owner</b>, the owner&apos;s <b>team manager</b>
+                {s.security.teamAccess !== 'none' ? <> and <b>team members</b> ({s.security.teamAccess === 'edit' ? 'edit' : 'read'})</> : null}, plus the Administrators, Sales managers, Support and Readers groups.
+                Members of the Sales group no longer reach other reps&apos; records, also outside the CRM (SharePoint, search, Power BI, Copilot).
+              </Text>
+              <Stack horizontal wrap tokens={{ childrenGap: 16 }} verticalAlign="end" style={{ marginTop: 8 }}>
+                <Toggle label="Enforce record-level security" checked={s.security.itemLevel} disabled={!engine.hasFeature('security')} onChange={(_, c) => upd({ security: { ...s.security, itemLevel: !!c } })} />
+                <Dropdown label="Team members" selectedKey={s.security.teamAccess} styles={{ root: { width: 220 } }}
+                  options={[{ key: 'none', text: 'No access to each other' }, { key: 'read', text: 'Can read each other\'s records' }, { key: 'edit', text: 'Can edit each other\'s records' }]}
+                  onChange={(_, o) => upd({ security: { ...s.security, teamAccess: (o?.key as 'none' | 'read' | 'edit') || 'read' } })} />
+              </Stack>
+              <Stack horizontal wrap tokens={{ childrenGap: 8 }} style={{ marginTop: 10 }}>
+                <PrimaryButton text={settings.security.itemLevel ? 'Apply to all records now' : 'Remove record permissions'} disabled={busy || dirty || !engine.hasFeature('security')}
+                  onClick={() => save(async () => {
+                    const r = await engine.applyItemSecurity(settings.security.itemLevel, setProgress);
+                    setProgress(`${settings.security.itemLevel ? 'Secured' : 'Reset'} ${r.secured} record(s); ${r.skipped} already up to date.`);
+                  })} />
+                {dirty && <Text variant="small" className="crm-muted">Save the settings first.</Text>}
+              </Stack>
+              <Text variant="small" className="crm-muted" block style={{ marginTop: 8 }}>
+                Records saved by administrators are secured immediately. For records created or reassigned by others (and by flows), turn on the Power Automate flow <b>Record security</b>, which runs every 15 minutes as a service account with full control of the site.
+                SharePoint supports up to 50,000 uniquely-permissioned items per list; keep that in mind for very large lists.
+              </Text>
             </Card>
           </div>
         </PivotItem>

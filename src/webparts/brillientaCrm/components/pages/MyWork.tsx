@@ -59,7 +59,7 @@ export const MyWork: React.FC = () => {
           {demos.length ? demos.map(d => <Row key={d.id} k="demos" r={d} sub={<><Pill text={d.status} /> {d.scheduledDate ? fmtDate(d.scheduledDate, true) : `preferred ${fmtDate(d.preferredDate, true) || '—'}`}</>} />) : <Text className="crm-muted">No demos this week.</Text>}
         </Card>
         <Card title={`Deals closing in 30 days (${closing.length})`}>
-          {closing.length ? closing.map(o => <Row key={o.id} k="opportunities" r={o} sub={<>{fmtMoney(o.amount, currency)} · {o.stage} · {fmtDate(o.expectedCloseDate)} {isOverdue(o.expectedCloseDate) && <Pill text="Overdue" />}</>} />) : <Text className="crm-muted">No deals closing soon.</Text>}
+          {closing.length ? closing.map(o => <Row key={o.id} k="opportunities" r={o} sub={<>{fmtMoney(o.amount, o.currency || currency)} · {o.stage} · {fmtDate(o.expectedCloseDate)} {isOverdue(o.expectedCloseDate) && <Pill text="Overdue" />}</>} />) : <Text className="crm-muted">No deals closing soon.</Text>}
         </Card>
         {engine.hasFeature('cases') && (
           <Card title={`My open cases (${cases.length})`} action={<Link onClick={() => undefined}> </Link>}>

@@ -4,10 +4,12 @@ import {
   Panel, PanelType, Icon, CommandButton, IContextualMenuItem, Link, FocusZone, TooltipHost, Customizer, LayerHost
 } from '@fluentui/react';
 import type { IBrillientaCrmProps } from './IBrillientaCrmProps';
-import { CrmData, EntityKey, IRecord } from '../models/model';
+import { CrmData, EntityKey, IRecord, IUserRef } from '../models/model';
 import { ICrmSettings } from '../models/settings';
 import { evaluateLicense } from '../models/license';
-import { DataService, IListStatus } from '../services/DataService';
+import { detectLang, Lang, LANGS, setLang, tr } from '../i18n';
+import { isNetworkError, offlineStore } from '../services/OfflineStore';
+import { DataService, IListStatus, Role } from '../services/DataService';
 import { GraphService } from '../services/Integrations';
 import { Engine } from '../services/Engine';
 import { CrmContext, ICrmContext, IOpenRecord } from './CrmContext';
@@ -129,6 +131,8 @@ const Notifications: React.FC<{ count: number; groups: { title: string; key: Ent
 };
 
 const BrillientaCrm: React.FC<IBrillientaCrmProps> = props => {
+  // Language: the user's choice on this device, else the SharePoint UI language.
+  const [lang, setLangState] = React.useState<Lang>(() => setLang(lsGet<string | undefined>('brillienta-crm:lang', undefined) || detectLang(props.culture)));
   const [data, setData] = React.useState<CrmData>({});
   const engine = React.useMemo(() => {
     const ds = new DataService(props.spHttpClient, props.webUrl, props.listNames);
@@ -167,6 +171,7 @@ const BrillientaCrm: React.FC<IBrillientaCrmProps> = props => {
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), type === MessageBarType.error ? 9000 : 4000);
   }, []);
 
+  const [net, setNet] = React.useState(0);
   const init = React.useCallback(async (): Promise<void> => {
     setPhase('loading');
     try {
@@ -178,16 +183,48 @@ const BrillientaCrm: React.FC<IBrillientaCrmProps> = props => {
       engine.setSession(me, role, license);
       setSettings(engine.settings);
       if (!st.every(s => s.exists && !s.missingFields.length)) { setPhase('setup'); return; }
+      offlineStore.put(`${engine.ds.cacheScope}|session|${props.tenantId}`, { settings: engine.settings, me, role, at: new Date().toISOString() }).catch(() => undefined);
       if (props.mode !== 'demoForm') {
         // warm the most-used lists in the background
         engine.ensure(['leads', 'opportunities', 'activities', 'demos']).catch(e => notify(errorText(e), MessageBarType.error));
       }
       setPhase('ready');
     } catch (e) {
+      // Offline: start from the session saved on this device the last time the CRM opened.
+      const cached = isNetworkError(e) ? await offlineStore.get<{ settings: ICrmSettings; me: IUserRef; role: Role }>(`${engine.ds.cacheScope}|session|${props.tenantId}`) : undefined;
+      if (cached) {
+        engine.ds.useSettings(cached.settings);
+        const license = await evaluateLicense(engine.settings.licenseKey, props.tenantId, engine.settings.installDate);
+        engine.setSession(cached.me, cached.role, license);
+        setSettings(engine.settings);
+        engine.ds.offlineSince = engine.ds.offlineSince || new Date().toISOString();
+        setNet(n => n + 1);
+        engine.ensure(['leads', 'opportunities', 'activities']).catch(() => undefined);
+        setPhase('ready');
+        return;
+      }
       setFatal(errorText(e));
       setPhase('error');
     }
   }, [engine]);
+
+  // Offline banner state and automatic sync when the connection returns.
+  React.useEffect(() => {
+    engine.ds.onOfflineChange = () => setNet(n => n + 1);
+    engine.onPendingChange = () => setNet(n => n + 1);
+    engine.countPending().then(() => setNet(n => n + 1)).catch(() => undefined);
+    const online = (): void => {
+      engine.syncOffline().then(r => {
+        if (r.sent || r.failed) { notify(`Back online: ${r.sent} offline change(s) saved${r.failed ? `, ${r.failed} could not be saved` : ''}.`, r.failed ? MessageBarType.warning : MessageBarType.success); }
+        return Promise.all(Object.keys(engine.data).map(k => engine.refresh(k as EntityKey)));
+      }).then(() => setNet(n => n + 1)).catch(() => undefined);
+    };
+    const offline = (): void => setNet(n => n + 1);
+    window.addEventListener('online', online);
+    window.addEventListener('offline', offline);
+    if (navigator.onLine) { online(); }
+    return () => { window.removeEventListener('online', online); window.removeEventListener('offline', offline); };
+  }, []);
 
   React.useEffect(() => { init().catch(() => undefined); }, [init]);
 
@@ -212,6 +249,7 @@ const BrillientaCrm: React.FC<IBrillientaCrmProps> = props => {
   React.useEffect(() => {
     if (phase !== 'ready' || props.mode === 'demoForm') { return undefined; }
     const t = setTimeout(() => {
+      engine.routeUnassignedLeads().then(n => { if (n) { notify(`${n} new lead(s) assigned to their territory team.`, MessageBarType.info); } }).catch(e => console.warn('Territory routing', errorText(e)));
       engine.runSequences().then(r => {
         if (r.sent || r.tasks || r.replied) { notify(`Sequences: ${[r.sent && `${r.sent} email(s) sent`, r.tasks && `${r.tasks} task(s) created`, r.replied && `${r.replied} stopped after a reply`].filter(Boolean).join(', ')}.`, MessageBarType.info); }
       }).catch(e => console.warn('Sequences', errorText(e)));
@@ -300,21 +338,21 @@ const BrillientaCrm: React.FC<IBrillientaCrmProps> = props => {
   const notifCount = myOverdue.length + myBreached.length + newForMe.length + demosToday.length;
 
   const nav: INav[] = [
-    { key: 'dashboard', label: 'Dashboard', icon: 'ViewDashboard', group: 'Home', show: true },
-    { key: 'mywork', label: 'My work', icon: 'TaskManager', group: 'Home', show: true, count: myOverdue.length || undefined },
-    { key: 'calendar', label: 'Calendar', icon: 'Calendar', group: 'Home', show: true },
+    { key: 'dashboard', label: tr('Dashboard'), icon: 'ViewDashboard', group: 'Home', show: true },
+    { key: 'mywork', label: tr('My work'), icon: 'TaskManager', group: 'Home', show: true, count: myOverdue.length || undefined },
+    { key: 'calendar', label: tr('Calendar'), icon: 'Calendar', group: 'Home', show: true },
     ...engine.defs.filter(d => d.key !== 'activities').map(d => ({
       key: `entity:${d.key}`, label: d.plural, icon: d.icon, group: d.area, show: true,
       count: d.key === 'leads' ? (data.leads || []).filter(l => l.status === 'New').length || undefined
         : d.key === 'demos' ? (data.demos || []).filter(x => x.status === 'Requested').length || undefined
         : d.key === 'cases' ? (data.cases || []).filter(x => x.caseStatus === 'New').length || undefined : undefined
     })),
-    { key: 'entity:activities', label: 'Activities', icon: 'BulletedList', group: 'Work', show: true },
-    { key: 'forecast', label: 'Forecast', icon: 'Chart', group: 'Insights', show: engine.can('forecast') },
-    { key: 'reports', label: 'Reports', icon: 'ReportDocument', group: 'Insights', show: true },
-    { key: 'audit', label: 'Audit log', icon: 'ComplianceAudit', group: 'Admin', show: engine.can('admin') && engine.hasFeature('audit') },
-    { key: 'settings', label: 'Settings', icon: 'Settings', group: 'Admin', show: engine.can('admin') },
-    { key: 'setup', label: 'Setup & health', icon: 'Repair', group: 'Admin', show: engine.can('admin') }
+    { key: 'entity:activities', label: engine.def('activities').plural, icon: 'BulletedList', group: 'Work', show: true },
+    { key: 'forecast', label: tr('Forecast'), icon: 'Chart', group: 'Insights', show: engine.can('forecast') },
+    { key: 'reports', label: tr('Reports'), icon: 'ReportDocument', group: 'Insights', show: true },
+    { key: 'audit', label: tr('Audit log'), icon: 'ComplianceAudit', group: 'Admin', show: engine.can('admin') && engine.hasFeature('audit') },
+    { key: 'settings', label: tr('Settings'), icon: 'Settings', group: 'Admin', show: engine.can('admin') },
+    { key: 'setup', label: tr('Setup & health'), icon: 'Repair', group: 'Admin', show: engine.can('admin') }
   ].filter(n => n.show);
   const groups = ['Home', 'Sales', 'Marketing', 'Service', 'Catalog', 'Work', 'Insights', 'Admin'];
   const current = nav.find(n => n.key === page) || nav[0];
@@ -326,7 +364,7 @@ const BrillientaCrm: React.FC<IBrillientaCrmProps> = props => {
         if (!items.length) { return null; }
         return (
           <div key={g} className="crm-nav-group">
-            {!compact && <div className="crm-nav-group-title">{g}</div>}
+            {!compact && <div className="crm-nav-group-title">{tr(g)}</div>}
             {items.map(n => (
               <TooltipHost key={n.key} content={compact ? n.label : undefined} directionalHint={DirectionalHint.rightCenter}>
                 <button className={`crm-nav-item${n.key === current.key ? ' crm-nav-active' : ''}`} aria-current={n.key === current.key ? 'page' : undefined}
@@ -404,10 +442,23 @@ const BrillientaCrm: React.FC<IBrillientaCrmProps> = props => {
                   <IconButton iconProps={{ iconName: fullScreen ? 'BackToWindow' : 'FullScreen' }} title={fullScreen ? 'Exit full screen (show SharePoint)' : 'Full screen'}
                     ariaLabel={fullScreen ? 'Exit full screen' : 'Full screen'} onClick={toggleFullScreen} />
                 )}
-                <IconButton iconProps={{ iconName: 'Refresh' }} title="Refresh data" ariaLabel="Refresh data"
+                <IconButton iconProps={{ iconName: 'LocaleLanguage' }} title={tr('Language')} ariaLabel={tr('Language')} menuProps={{
+                  items: LANGS.map(l => ({ key: l.key, text: l.text, canCheck: true, checked: l.key === lang, onClick: () => {
+                    setLang(l.key); lsSet('brillienta-crm:lang', l.key); engine.ds.useSettings(engine.settings); setLangState(l.key); setData(d => ({ ...d }));
+                  } }))
+                }} />
+                <IconButton iconProps={{ iconName: 'Refresh' }} title={tr('Refresh data')} ariaLabel={tr('Refresh data')}
                   onClick={() => { Promise.all(Object.keys(data).map(k => engine.refresh(k as EntityKey))).then(() => notify('Data refreshed.')).catch(e => notify(errorText(e), MessageBarType.error)); }} />
               </Stack>
             </div>
+            {(engine.ds.offlineSince || !navigator.onLine || engine.pendingChanges > 0) && net >= 0 && (
+              <MessageBar messageBarType={MessageBarType.warning} isMultiline={false}
+                actions={navigator.onLine && engine.pendingChanges > 0 ? <Link onClick={() => { engine.syncOffline().then(r => notify(`${r.sent} change(s) saved.`)).catch(() => undefined); }}>Sync now</Link> : undefined}>
+                {engine.ds.offlineSince || !navigator.onLine
+                  ? `Offline – showing data saved ${engine.ds.offlineSince ? new Date(engine.ds.offlineSince).toLocaleString() : 'earlier'}. Changes are kept on this device${engine.pendingChanges ? ` (${engine.pendingChanges} waiting)` : ''} and saved when you are back online.`
+                  : `${engine.pendingChanges} offline change(s) waiting to be saved.`}
+              </MessageBar>
+            )}
             {(lic.status !== 'active' || (lic.daysLeft !== undefined && lic.daysLeft <= 14)) && (
               <MessageBar isMultiline={false} messageBarType={lic.canWrite ? (lic.status === 'trial' ? MessageBarType.info : MessageBarType.warning) : MessageBarType.severeWarning}
                 actions={engine.can('admin') ? <Link onClick={() => ctx.navigate('settings')}>Manage licence</Link> : undefined}>

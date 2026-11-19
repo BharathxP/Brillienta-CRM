@@ -11,7 +11,7 @@ export type FieldType =
   | 'date' | 'datetime' | 'boolean' | 'user' | 'lookup' | 'tags' | 'json';
 
 /** Choice lists that admins can edit in Settings. */
-export type ChoiceSource = 'stages' | 'leadSources' | 'industries' | 'caseCategories' | 'lostReasons';
+export type ChoiceSource = 'stages' | 'leadSources' | 'industries' | 'caseCategories' | 'lostReasons' | 'currencies' | 'priceBooks' | 'teams';
 
 export interface IFieldDef {
   key: string;
@@ -100,6 +100,8 @@ export const QUOTE_STATUSES = ['Draft', 'Sent', 'Accepted', 'Rejected', 'Expired
 export const CASE_STATUSES = ['New', 'In progress', 'Waiting on customer', 'Resolved', 'Closed'];
 export const CASE_PRIORITIES = ['Low', 'Normal', 'High', 'Critical'];
 export const FORECAST_CATEGORIES = ['Pipeline', 'Best case', 'Commit', 'Omitted', 'Closed'];
+/** Record types whose items get their own SharePoint permissions when item-level security is on. */
+export const SECURED_ENTITIES: EntityKey[] = ['leads', 'accounts', 'contacts', 'opportunities', 'quotes', 'cases', 'subscriptions', 'invoices'];
 export const SUBSCRIPTION_STATUSES = ['Trial', 'Active', 'Pending renewal', 'Cancelled', 'Expired'];
 export const INVOICE_STATUSES = ['Draft', 'Sent', 'Paid', 'Overdue', 'Void'];
 export const DEAL_TYPES = ['New business', 'Renewal', 'Upsell'];
@@ -135,11 +137,17 @@ export const ENTITIES: IEntityDef[] = [
       f('country', 'Country', 'text', { section: 'General', filter: true }),
       f('industry', 'Industry', 'choice', { choicesFrom: 'industries', section: 'General', filter: true }),
       f('website', 'Website', 'url', { section: 'General' }),
+      f('linkedIn', 'LinkedIn', 'url', { section: 'Enrichment' }),
+      f('companySize', 'Employees', 'text', { section: 'Enrichment' }),
+      f('companyInfo', 'Company information', 'note', { section: 'Enrichment', readOnly: true }),
+      f('enrichStatus', 'Enrichment', 'choice', { choices: ['Requested', 'Done', 'Not found'], section: 'Enrichment', readOnly: true, filter: true }),
+      f('enrichedAt', 'Enriched on', 'datetime', { section: 'Enrichment', readOnly: true }),
       f('leadSource', 'Lead source', 'choice', { choicesFrom: 'leadSources', section: 'Qualification', grid: true, filter: true }),
       f('status', 'Status', 'choice', { choices: LEAD_STATUSES, defaultValue: 'New', section: 'Qualification', grid: true, filter: true }),
       f('rating', 'Rating', 'choice', { choices: ['Hot', 'Warm', 'Cold'], defaultValue: 'Warm', section: 'Qualification', grid: true, filter: true }),
       f('leadScore', 'Score', 'number', { readOnly: true, section: 'Qualification', grid: true }),
       { ...owner('LeadOwner'), section: 'Qualification' },
+      f('securedOwner', 'Secured for', 'number', { hidden: true }),
       f('nextFollowUp', 'Next follow-up', 'datetime', { section: 'Qualification', grid: true }),
       f('offer', 'Product / offer', 'text', { section: 'Qualification' }),
       f('actionCode', 'Marketplace action', 'text', { section: 'Qualification', readOnly: true }),
@@ -170,11 +178,16 @@ export const ENTITIES: IEntityDef[] = [
       f('accountType', 'Type', 'choice', { choices: ['Prospect', 'Customer', 'Partner', 'Competitor', 'Other'], defaultValue: 'Prospect', section: 'General', grid: true, filter: true }),
       f('industry', 'Industry', 'choice', { choicesFrom: 'industries', section: 'General', grid: true, filter: true }),
       f('website', 'Website', 'url', { section: 'General' }),
+      f('linkedIn', 'LinkedIn', 'url', { section: 'Enrichment' }),
+      f('companyInfo', 'Company information', 'note', { section: 'Enrichment', readOnly: true }),
+      f('enrichStatus', 'Enrichment', 'choice', { choices: ['Requested', 'Done', 'Not found'], section: 'Enrichment', readOnly: true, filter: true }),
+      f('enrichedAt', 'Enriched on', 'datetime', { section: 'Enrichment', readOnly: true }),
       f('email', 'Email', 'email', { section: 'General' }),
       f('phone', 'Phone', 'phone', { section: 'General', grid: true }),
       f('employees', 'Employees', 'number', { section: 'General' }),
       f('annualRevenue', 'Annual revenue', 'currency', { section: 'General' }),
       owner('AccountOwner'),
+      f('securedOwner', 'Secured for', 'number', { hidden: true }),
       f('street', 'Street', 'text', { section: 'Address' }),
       f('city', 'City', 'text', { section: 'Address', grid: true }),
       f('state', 'State / region', 'text', { section: 'Address' }),
@@ -211,6 +224,7 @@ export const ENTITIES: IEntityDef[] = [
       f('jobTitle', 'Job title', 'text', { section: 'General', grid: true }),
       ref('accountRef', 'Account', 'accounts', { section: 'General', grid: true, filter: true }),
       owner('ContactOwner'),
+      f('securedOwner', 'Secured for', 'number', { hidden: true }),
       f('linkedIn', 'LinkedIn', 'url', { section: 'General' }),
       f('country', 'Country', 'text', { section: 'General', filter: true }),
       f('preferredContact', 'Preferred contact method', 'choice', { choices: ['Email', 'Phone', 'Teams', 'Any'], section: 'Privacy' }),
@@ -218,6 +232,9 @@ export const ENTITIES: IEntityDef[] = [
       f('consentDate', 'Consent date', 'date', { section: 'Privacy' }),
       f('unsubscribed', 'Unsubscribed from marketing', 'boolean', { section: 'Privacy', filter: true }),
       f('unsubToken', 'Unsubscribe token', 'text', { hidden: true }),
+      f('portalLastLogin', 'Last portal sign-in', 'datetime', { section: 'Privacy', readOnly: true }),
+      f('portalToken', 'Portal token', 'text', { hidden: true }),
+      f('portalTokenExpires', 'Portal token expires', 'datetime', { hidden: true }),
       { ...tags, section: 'Privacy' },
       f('description', 'Notes', 'note', { section: 'Details' })
     ]
@@ -236,9 +253,12 @@ export const ENTITIES: IEntityDef[] = [
       f('probability', 'Probability', 'percent', { section: 'General', grid: true }),
       f('forecastCategory', 'Forecast category', 'choice', { choices: FORECAST_CATEGORIES, section: 'General', filter: true }),
       f('dealType', 'Deal type', 'choice', { choices: DEAL_TYPES, defaultValue: 'New business', section: 'General', filter: true }),
+      f('currency', 'Currency', 'choice', { choicesFrom: 'currencies', section: 'General', filter: true }),
+      f('amountBase', 'Amount (company currency)', 'currency', { section: 'General', readOnly: true }),
       f('expectedCloseDate', 'Expected close', 'date', { section: 'General', grid: true }),
       f('actualCloseDate', 'Actual close', 'date', { section: 'General' }),
       { ...owner('DealOwner') },
+      f('securedOwner', 'Secured for', 'number', { hidden: true }),
       f('nextStep', 'Next step', 'text', { section: 'General' }),
       f('licenses', 'Licenses / seats', 'number', { section: 'Details' }),
       f('competitors', 'Competitors', 'text', { section: 'Details' }),
@@ -268,6 +288,7 @@ export const ENTITIES: IEntityDef[] = [
       ref('contactRef', 'Contact', 'contacts', { section: 'General' }),
       f('quoteStatus', 'Status', 'choice', { choices: QUOTE_STATUSES, defaultValue: 'Draft', section: 'General', grid: true, filter: true }),
       f('validUntil', 'Valid until', 'date', { section: 'General', grid: true }),
+      f('priceBook', 'Price book', 'choice', { choicesFrom: 'priceBooks', section: 'General', filter: true }),
       f('approvalStatus', 'Approval', 'choice', { choices: ['Pending', 'Approved', 'Rejected'], section: 'General', grid: true, filter: true, readOnly: true }),
       f('approvalNote', 'Approver comments', 'note', { section: 'General', readOnly: true }),
       f('signatureStatus', 'E-signature', 'choice', { choices: ['Sent', 'Viewed', 'Signed', 'Declined'], section: 'Signature', readOnly: true, filter: true }),
@@ -281,8 +302,9 @@ export const ENTITIES: IEntityDef[] = [
       f('signatureToken', 'Signing token', 'text', { hidden: true }),
       f('signedSnapshot', 'Signed content', 'note', { hidden: true }),
       f('signatureProcessed', 'Signature processed', 'boolean', { hidden: true }),
-      f('currency', 'Currency', 'text', { hidden: true }),
+      f('currency', 'Currency', 'choice', { choicesFrom: 'currencies', section: 'General' }),
       owner('QuoteOwner'),
+      f('securedOwner', 'Secured for', 'number', { hidden: true }),
       f('lineItems', 'Line items', 'json', { hidden: true }),
       f('subtotal', 'Subtotal', 'currency', { readOnly: true, hidden: true }),
       f('discountTotal', 'Discount', 'currency', { readOnly: true, hidden: true }),
@@ -341,8 +363,9 @@ export const ENTITIES: IEntityDef[] = [
       f('priority', 'Priority', 'choice', { choices: CASE_PRIORITIES, defaultValue: 'Normal', section: 'General', grid: true, filter: true }),
       f('caseStatus', 'Status', 'choice', { choices: CASE_STATUSES, defaultValue: 'New', section: 'General', grid: true, filter: true }),
       f('category', 'Category', 'choice', { choicesFrom: 'caseCategories', section: 'General', filter: true }),
-      f('origin', 'Origin', 'choice', { choices: ['Email', 'Phone', 'Web', 'Teams', 'Marketplace', 'Other'], section: 'General', filter: true }),
+      f('origin', 'Origin', 'choice', { choices: ['Email', 'Phone', 'Web', 'Portal', 'Teams', 'Marketplace', 'Other'], section: 'General', filter: true }),
       owner('CaseOwner'),
+      f('securedOwner', 'Secured for', 'number', { hidden: true }),
       f('slaDue', 'SLA due', 'datetime', { readOnly: true, section: 'General', grid: true }),
       f('firstResponseDue', 'First response due', 'datetime', { readOnly: true, section: 'SLA' }),
       f('firstRespondedAt', 'First responded', 'datetime', { readOnly: true, section: 'SLA' }),
@@ -413,6 +436,7 @@ export const ENTITIES: IEntityDef[] = [
       f('subStatus', 'Status', 'choice', { choices: SUBSCRIPTION_STATUSES, defaultValue: 'Active', section: 'General', grid: true, filter: true }),
       f('billingCycle', 'Billing', 'choice', { choices: ['Monthly', 'Annual'], defaultValue: 'Annual', section: 'General', filter: true }),
       f('quantity', 'Seats / quantity', 'number', { section: 'General', defaultValue: 1 }),
+      f('currency', 'Currency', 'choice', { choicesFrom: 'currencies', section: 'General' }),
       f('unitPrice', 'Price per seat per period', 'currency', { section: 'General' }),
       f('mrr', 'MRR', 'currency', { section: 'General', readOnly: true, grid: true }),
       f('arr', 'ARR', 'currency', { section: 'General', readOnly: true }),
@@ -421,6 +445,7 @@ export const ENTITIES: IEntityDef[] = [
       f('endDate', 'Ended on', 'date', { section: 'Term' }),
       f('autoRenew', 'Auto-renew', 'boolean', { defaultValue: true, section: 'Term', filter: true }),
       owner('SubscriptionOwner'),
+      f('securedOwner', 'Secured for', 'number', { hidden: true }),
       f('licenseKey', 'Licence key', 'note', { section: 'Licence' }),
       ref('contactRef', 'Billing contact', 'contacts'),
       ref('opportunityRef', 'Opportunity', 'opportunities'),
@@ -441,12 +466,13 @@ export const ENTITIES: IEntityDef[] = [
       f('issueDate', 'Issue date', 'date', { section: 'General', grid: true }),
       f('dueDate', 'Due date', 'date', { section: 'General', grid: true }),
       owner('InvoiceOwner'),
+      f('securedOwner', 'Secured for', 'number', { hidden: true }),
       f('lineItems', 'Line items', 'json', { hidden: true }),
       f('subtotal', 'Subtotal', 'currency', { readOnly: true, hidden: true }),
       f('discountTotal', 'Discount', 'currency', { readOnly: true, hidden: true }),
       f('taxTotal', 'Tax', 'currency', { readOnly: true, hidden: true }),
       f('grandTotal', 'Total', 'currency', { readOnly: true, hidden: true, grid: true }),
-      f('currency', 'Currency', 'text', { hidden: true }),
+      f('currency', 'Currency', 'choice', { choicesFrom: 'currencies', section: 'General' }),
       f('amountPaid', 'Amount paid', 'currency', { section: 'Payment' }),
       f('paidDate', 'Paid on', 'date', { section: 'Payment' }),
       f('paymentLink', 'Payment link', 'url', { section: 'Payment' }),

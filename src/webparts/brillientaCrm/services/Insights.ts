@@ -68,7 +68,7 @@ export function recordBrief(engine: Engine, key: EntityKey, r: IRecord): IBrief 
     }
     case 'opportunities': {
       const st = r.stage || '';
-      headline = `${money(r.amount)} ${st} deal${r.dealType && r.dealType !== 'New business' ? ` (${String(r.dealType).toLowerCase()})` : ''}, ${r.probability ?? 0}% · close ${fmtDate(r.expectedCloseDate) || 'not set'}`;
+      headline = `${fmtMoney(r.amount || 0, r.currency || cur)} ${st} deal${r.dealType && r.dealType !== 'New business' ? ` (${String(r.dealType).toLowerCase()})` : ''}, ${r.probability ?? 0}% · close ${fmtDate(r.expectedCloseDate) || 'not set'}`;
       const quotes = (engine.data.quotes || []).filter(q => q.opportunityRef === r.id);
       if (quotes.length) { facts.push(`Quotes: ${quotes.map(q => `${q.quoteNumber} ${q.quoteStatus || ''}${q.signatureStatus ? ` (${q.signatureStatus})` : ''}`).join(', ')}`); }
       if (st !== WON && st !== LOST) {
@@ -92,7 +92,7 @@ export function recordBrief(engine: Engine, key: EntityKey, r: IRecord): IBrief 
       const cases = (engine.data.cases || []).filter(c => c.accountRef === r.id && c.caseStatus !== 'Resolved' && c.caseStatus !== 'Closed');
       const unpaid = (engine.data.invoices || []).filter(i => i.accountRef === r.id && (i.invoiceStatus === 'Sent' || i.invoiceStatus === 'Overdue'));
       const mrr = subs.reduce((t, s) => t + (s.mrr || 0), 0);
-      headline = `${r.accountType || 'Account'}${r.industry ? ` in ${r.industry}` : ''}: won ${money(won.reduce((t, o) => t + (o.amount || 0), 0))}, open pipeline ${money(open.reduce((t, o) => t + (o.amount || 0), 0))}${mrr ? `, MRR ${money(mrr)}` : ''}`;
+      headline = `${r.accountType || 'Account'}${r.industry ? ` in ${r.industry}` : ''}: won ${money(won.reduce((t, o) => t + engine.baseAmount(o), 0))}, open pipeline ${money(open.reduce((t, o) => t + engine.baseAmount(o), 0))}${mrr ? `, MRR ${money(mrr)}` : ''}`;
       facts.push(`${plural((engine.data.contacts || []).filter(c => c.accountRef === r.id).length, 'contact')}, ${plural(open.length, 'open deal')}, ${plural(cases.length, 'open case')}`);
       subs.filter(s => (daysTo(s.renewalDate) ?? 999) <= engine.settings.renewals.leadDays).forEach(s => next.push(`Renewal of “${s.title}” due ${fmtDate(s.renewalDate)}.`));
       if (cases.some(c => slaBreached(c))) { risks.push('A support case has breached its SLA.'); }

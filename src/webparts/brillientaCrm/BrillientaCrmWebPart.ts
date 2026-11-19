@@ -153,6 +153,7 @@ export default class BrillientaCrmWebPart extends BaseClientSideWebPart<IBrillie
       host: this._host,
       tenantSiteUrl: this._tenantSiteUrl,
       tenantId: ctx.pageContext.aadInfo?.tenantId?.toString() || '',
+      culture: ctx.pageContext.cultureInfo?.currentUICultureName,
       isSiteAdmin: sameSite && (!!ctx.pageContext.legacyPageContext?.isSiteAdmin || ctx.pageContext.web.permissions.hasPermission(SPPermission.manageWeb)),
       listNames: this.listNames,
       mode: p.mode || 'crm',

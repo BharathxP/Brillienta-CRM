@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0" xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0" xsi:type="MailApp">
+  <Id>6f0b8c0e-3d7a-4c1e-9b2f-b7c1c3e0a5d1</Id>
+  <Version>1.0.0.0</Version>
+  <ProviderName>Brillienta</ProviderName>
+  <DefaultLocale>en-US</DefaultLocale>
+  <DisplayName DefaultValue="Brillienta CRM"/>
+  <Description DefaultValue="See the sender in Brillienta CRM, track emails on contacts and leads, and create leads from Outlook."/>
+  <IconUrl DefaultValue="https://brillienta.com/crm-addin/icon-64.png"/>
+  <HighResolutionIconUrl DefaultValue="https://brillienta.com/crm-addin/icon-128.png"/>
+  <SupportUrl DefaultValue="https://brillienta.com/contact"/>
+  <AppDomains>
+    <AppDomain>https://brillienta.com</AppDomain>
+    <AppDomain>https://login.microsoftonline.com</AppDomain>
+  </AppDomains>
+  <Hosts><Host Name="Mailbox"/></Hosts>
+  <Requirements><Sets><Set Name="Mailbox" MinVersion="1.5"/></Sets></Requirements>
+  <FormSettings>
+    <Form xsi:type="ItemRead"><DesktopSettings><SourceLocation DefaultValue="https://brillienta.com/crm-addin/taskpane.html"/><RequestedHeight>450</RequestedHeight></DesktopSettings></Form>
+  </FormSettings>
+  <Permissions>ReadItem</Permissions>
+  <Rule xsi:type="RuleCollection" Mode="Or"><Rule xsi:type="ItemIs" ItemType="Message" FormType="Read"/></Rule>
+  <DisableEntityHighlighting>false</DisableEntityHighlighting>
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides" xsi:type="VersionOverridesV1_0">
+    <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides/1.1" xsi:type="VersionOverridesV1_1">
+      <Requirements><bt:Sets DefaultMinVersion="1.5"><bt:Set Name="Mailbox"/></bt:Sets></Requirements>
+      <Hosts>
+        <Host xsi:type="MailHost">
+          <DesktopFormFactor>
+            <ExtensionPoint xsi:type="MessageReadCommandSurface">
+              <OfficeTab id="TabDefault">
+                <Group id="brCrmGroup">
+                  <Label resid="groupLabel"/>
+                  <Control xsi:type="Button" id="brCrmOpen">
+                    <Label resid="buttonLabel"/>
+                    <Supertip><Title resid="buttonLabel"/><Description resid="buttonTip"/></Supertip>
+                    <Icon><bt:Image size="16" resid="icon16"/><bt:Image size="32" resid="icon32"/><bt:Image size="80" resid="icon80"/></Icon>
+                    <Action xsi:type="ShowTaskpane"><SourceLocation resid="taskpaneUrl"/><SupportsPinning>true</SupportsPinning></Action>
+                  </Control>
+                </Group>
+              </OfficeTab>
+            </ExtensionPoint>
+          </DesktopFormFactor>
+          <MobileFormFactor>
+            <ExtensionPoint xsi:type="MobileMessageReadCommandSurface">
+              <Group id="brCrmMobileGroup">
+                <Label resid="groupLabel"/>
+                <Control xsi:type="MobileButton" id="brCrmMobileOpen">
+                  <Label resid="buttonLabel"/>
+                  <Icon xsi:type="bt:MobileIconList"><bt:Image size="25" scale="1" resid="icon32"/><bt:Image size="25" scale="2" resid="icon64"/><bt:Image size="25" scale="3" resid="icon80"/>
+                    <bt:Image size="32" scale="1" resid="icon32"/><bt:Image size="32" scale="2" resid="icon64"/><bt:Image size="32" scale="3" resid="icon128"/>
+                    <bt:Image size="48" scale="1" resid="icon64"/><bt:Image size="48" scale="2" resid="icon128"/><bt:Image size="48" scale="3" resid="icon128"/></Icon>
+                  <Action xsi:type="ShowTaskpane"><SourceLocation resid="taskpaneUrl"/></Action>
+                </Control>
+              </Group>
+            </ExtensionPoint>
+          </MobileFormFactor>
+        </Host>
+      </Hosts>
+      <Resources>
+        <bt:Images>
+          <bt:Image id="icon16" DefaultValue="https://brillienta.com/crm-addin/icon-16.png"/>
+          <bt:Image id="icon32" DefaultValue="https://brillienta.com/crm-addin/icon-32.png"/>
+          <bt:Image id="icon64" DefaultValue="https://brillienta.com/crm-addin/icon-64.png"/>
+          <bt:Image id="icon80" DefaultValue="https://brillienta.com/crm-addin/icon-80.png"/>
+          <bt:Image id="icon128" DefaultValue="https://brillienta.com/crm-addin/icon-128.png"/>
+        </bt:Images>
+        <bt:Urls><bt:Url id="taskpaneUrl" DefaultValue="https://brillienta.com/crm-addin/taskpane.html"/></bt:Urls>
+        <bt:ShortStrings><bt:String id="groupLabel" DefaultValue="Brillienta CRM"/><bt:String id="buttonLabel" DefaultValue="CRM"/></bt:ShortStrings>
+        <bt:LongStrings><bt:String id="buttonTip" DefaultValue="See the sender in Brillienta CRM and track this email."/></bt:LongStrings>
+      </Resources>
+    </VersionOverrides>
+  </VersionOverrides>
+</OfficeApp>

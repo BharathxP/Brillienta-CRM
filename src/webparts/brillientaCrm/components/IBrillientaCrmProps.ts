@@ -16,6 +16,8 @@ export interface IBrillientaCrmProps {
   /** Tenant-wide default CRM site (storage entity), if set. */
   tenantSiteUrl: string;
   tenantId: string;
+  /** SharePoint UI culture, e.g. "de-DE" (default language). */
+  culture?: string;
   /** Current user can manage the site (site owner) → CRM administrator. */
   isSiteAdmin: boolean;
   listNames: Partial<Record<ListKey, string>>;

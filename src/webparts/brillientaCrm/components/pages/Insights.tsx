@@ -69,25 +69,35 @@ export const ForecastPage: React.FC = () => {
   const { engine, currency, settings, open } = useCrm();
   const { rows } = useEntities('opportunities');
   const [offset, setOffset] = React.useState(0);
+  const [teamId, setTeamId] = React.useState<string>('');
   const q = quarterRange(offset, settings.fiscalYearStartMonth);
   const money = (n: number): string => fmtMoney(n, currency);
   const opps = rows('opportunities');
   const inQ = (o: IRecord): boolean => inRange(o.stage === WON ? o.actualCloseDate : o.expectedCloseDate, q.start, q.end);
-  const qOpps = opps.filter(o => inQ(o) && o.stage !== LOST);
+  const memberIds = teamId ? engine.teamMemberIds(teamId) : [];
+  const inTeam = (id?: number): boolean => !teamId || (!!id && memberIds.indexOf(id) >= 0);
+  const allQ = opps.filter(o => inQ(o) && o.stage !== LOST);
+  const qOpps = allQ.filter(o => inTeam(o.owner?.id));
 
   const owners: { id: number; title: string }[] = [];
   qOpps.forEach(o => { if (o.owner && !owners.some(x => x.id === o.owner.id)) { owners.push(o.owner); } });
-  settings.quotas.forEach(qt => { if (!owners.some(x => x.id === qt.user.id)) { owners.push(qt.user); } });
+  settings.quotas.forEach(qt => { if (inTeam(qt.user.id) && !owners.some(x => x.id === qt.user.id)) { owners.push(qt.user); } });
 
   const calc = (list: IRecord[]): { won: number; commit: number; best: number; pipeline: number; weighted: number } => ({
-    won: sum(list.filter(o => o.stage === WON), o => o.amount),
-    commit: sum(list.filter(o => o.stage !== WON && o.forecastCategory === 'Commit'), o => o.amount),
-    best: sum(list.filter(o => o.stage !== WON && o.forecastCategory === 'Best case'), o => o.amount),
-    pipeline: sum(list.filter(o => o.stage !== WON && (o.forecastCategory === 'Pipeline' || !o.forecastCategory)), o => o.amount),
-    weighted: sum(list.filter(o => o.stage !== WON), o => (o.amount * (o.probability || 0)) / 100)
+    won: sum(list.filter(o => o.stage === WON), o => engine.baseAmount(o)),
+    commit: sum(list.filter(o => o.stage !== WON && o.forecastCategory === 'Commit'), o => engine.baseAmount(o)),
+    best: sum(list.filter(o => o.stage !== WON && o.forecastCategory === 'Best case'), o => engine.baseAmount(o)),
+    pipeline: sum(list.filter(o => o.stage !== WON && (o.forecastCategory === 'Pipeline' || !o.forecastCategory)), o => engine.baseAmount(o)),
+    weighted: sum(list.filter(o => o.stage !== WON), o => (engine.baseAmount(o) * (o.probability || 0)) / 100)
   });
   const team = calc(qOpps);
-  const teamQuota = sum(settings.quotas, x => x.quarterly);
+  const teamQuota = sum(settings.quotas.filter(x => inTeam(x.user.id)), x => x.quarterly);
+  const byTeam = settings.teams.map(t => {
+    const ids = engine.teamMemberIds(t.id);
+    const c = calc(allQ.filter(o => !!o.owner && ids.indexOf(o.owner.id) >= 0));
+    const quota = sum(settings.quotas.filter(x => ids.indexOf(x.user.id) >= 0), x => x.quarterly);
+    return { key: t.id, owner: t.name, quota, ...c, projected: c.won + c.commit };
+  });
 
   const rowsData = owners.map(u => {
     const c = calc(qOpps.filter(o => o.owner?.id === u.id));
@@ -95,7 +105,7 @@ export const ForecastPage: React.FC = () => {
     return { key: String(u.id), owner: u.title, quota, ...c, projected: c.won + c.commit };
   }).sort((a, b) => b.won - a.won);
   const unassigned = calc(qOpps.filter(o => !o.owner));
-  if (unassigned.won + unassigned.commit + unassigned.best + unassigned.pipeline > 0) {
+  if (!teamId && unassigned.won + unassigned.commit + unassigned.best + unassigned.pipeline > 0) {
     rowsData.push({ key: 'none', owner: 'Unassigned', quota: 0, ...unassigned, projected: unassigned.won + unassigned.commit });
   }
 
@@ -113,7 +123,7 @@ export const ForecastPage: React.FC = () => {
   const months = [0, 1, 2].map(i => {
     const s = new Date(q.start.getFullYear(), q.start.getMonth() + i, 1);
     const e = new Date(q.start.getFullYear(), q.start.getMonth() + i + 1, 1);
-    return { label: monthLabel(s), short: s.toLocaleDateString(undefined, { month: 'short' }), value: sum(qOpps.filter(o => inRange(o.stage === WON ? o.actualCloseDate : o.expectedCloseDate, s, e)), o => o.amount) };
+    return { label: monthLabel(s), short: s.toLocaleDateString(undefined, { month: 'short' }), value: sum(qOpps.filter(o => inRange(o.stage === WON ? o.actualCloseDate : o.expectedCloseDate, s, e)), o => engine.baseAmount(o)) };
   });
   const slipping = opps.filter(o => engine.openStages().indexOf(o.stage) >= 0 && isOverdue(o.expectedCloseDate));
 
@@ -124,6 +134,8 @@ export const ForecastPage: React.FC = () => {
         <Text variant="large" styles={{ root: { fontWeight: 600 } }}>{q.label} · {q.start.toLocaleDateString()} – {new Date(q.end.getTime() - 1).toLocaleDateString()}</Text>
         <IconButton iconProps={{ iconName: 'ChevronRight' }} ariaLabel="Next quarter" onClick={() => setOffset(offset + 1)} />
         {offset !== 0 && <DefaultButton text="This quarter" onClick={() => setOffset(0)} />}
+        {settings.teams.length > 0 && <Dropdown ariaLabel="Team" selectedKey={teamId} styles={{ root: { width: 180 } }} onChange={(_, o) => setTeamId(String(o?.key || ''))}
+          options={[{ key: '', text: 'All teams' }, ...settings.teams.map(t => ({ key: t.id, text: t.name }))]} />}
         <DefaultButton iconProps={{ iconName: 'ExcelDocument' }} text="Export" onClick={() => exportCsv(`forecast-${q.label}.csv`, rowsData.map(r => ({
           Owner: r.owner, Quota: r.quota, ClosedWon: r.won, Commit: r.commit, BestCase: r.best, Pipeline: r.pipeline, Weighted: Math.round(r.weighted)
         })))} />
@@ -137,7 +149,12 @@ export const ForecastPage: React.FC = () => {
         <div className="crm-kpi"><div className="crm-kpi-value">{teamQuota ? money(teamQuota) : '—'}</div><div className="crm-kpi-label">Team quota</div><div className="crm-kpi-hint">Set quotas in Settings › Sales</div></div>
       </div>
       <div className="crm-dash-grid">
-        <Card title="Forecast by rep" wide>
+        {!teamId && byTeam.length > 0 && (
+          <Card title="Forecast by team" wide>
+            <DetailsList items={byTeam} columns={cols.map(c => (c.key === 'owner' ? { ...c, name: 'Team' } : c))} selectionMode={SelectionMode.none} layoutMode={DetailsListLayoutMode.justified} />
+          </Card>
+        )}
+        <Card title={teamId ? `Forecast by rep · ${settings.teams.find(t => t.id === teamId)?.name || ''}` : 'Forecast by rep'} wide>
           <DetailsList items={rowsData} columns={cols} selectionMode={SelectionMode.none} layoutMode={DetailsListLayoutMode.justified} />
           {!rowsData.length && <Text className="crm-muted">No deals closing in this quarter.</Text>}
         </Card>
@@ -150,7 +167,7 @@ export const ForecastPage: React.FC = () => {
           {slipping.slice(0, 8).map(o => (
             <div key={o.id} className="crm-list-row" role="button" tabIndex={0} onClick={() => open('opportunities', o)} onKeyDown={e => { if (e.key === 'Enter') { open('opportunities', o); } }}>
               <Text styles={{ root: { fontWeight: 600 } }}>{o.title}</Text>
-              <Text variant="small" className="crm-muted">{money(o.amount)} · was due {new Date(o.expectedCloseDate).toLocaleDateString()} · {o.owner?.title || 'Unassigned'}</Text>
+              <Text variant="small" className="crm-muted">{fmtMoney(o.amount || 0, o.currency || currency)} · was due {new Date(o.expectedCloseDate).toLocaleDateString()} · {o.owner?.title || 'Unassigned'}</Text>
             </div>
           ))}
         </Card>
@@ -191,9 +208,9 @@ export const ReportsPage: React.FC = () => {
   const ownerMap: Record<string, { owner: string; won: number; deals: number; lost: number; pipeline: number; activities: number }> = {};
   const ensure = (name: string): { owner: string; won: number; deals: number; lost: number; pipeline: number; activities: number } =>
     (ownerMap[name] = ownerMap[name] || { owner: name, won: 0, deals: 0, lost: 0, pipeline: 0, activities: 0 });
-  won.forEach(o => { const e = ensure(o.owner?.title || 'Unassigned'); e.won += o.amount || 0; e.deals++; });
+  won.forEach(o => { const e = ensure(o.owner?.title || 'Unassigned'); e.won += engine.baseAmount(o); e.deals++; });
   lost.forEach(o => { ensure(o.owner?.title || 'Unassigned').lost++; });
-  opps.filter(o => engine.openStages().indexOf(o.stage) >= 0).forEach(o => { ensure(o.owner?.title || 'Unassigned').pipeline += o.amount || 0; });
+  opps.filter(o => engine.openStages().indexOf(o.stage) >= 0).forEach(o => { ensure(o.owner?.title || 'Unassigned').pipeline += engine.baseAmount(o) || 0; });
   rows('activities').filter(a => created(a) && a.activityType !== 'Note').forEach(a => { if (a.author) { ensure(a.author.title).activities++; } });
   const board = Object.keys(ownerMap).map(k => ownerMap[k]).sort((a, b) => b.won - a.won);
 
@@ -201,14 +218,14 @@ export const ReportsPage: React.FC = () => {
   const sources = groupCount(leads, l => l.leadSource).map(s => {
     const ls = leads.filter(l => (l.leadSource || '(none)') === s.label);
     const ids = ls.map(l => l.id);
-    const rev = sum(won.filter(o => o.leadRef && ids.indexOf(o.leadRef) >= 0), o => o.amount);
+    const rev = sum(won.filter(o => o.leadRef && ids.indexOf(o.leadRef) >= 0), o => engine.baseAmount(o));
     return { key: s.label, source: s.label, leads: s.value, converted: ls.filter(l => l.status === 'Converted').length, revenue: rev };
   });
 
   // campaign ROI
   const campaigns = rows('campaigns').map(c => {
     const cl = rows('leads').filter(l => l.campaignRef === c.id).length;
-    const rev = sum(opps.filter(o => o.campaignRef === c.id && o.stage === WON), o => o.amount);
+    const rev = sum(opps.filter(o => o.campaignRef === c.id && o.stage === WON), o => engine.baseAmount(o));
     const cost = Number(c.actualCost || c.budget || 0);
     return { key: String(c.id), name: c.title, leads: cl, revenue: rev, cost, roi: cost ? Math.round(((rev - cost) / cost) * 100) : undefined };
   });
@@ -232,9 +249,9 @@ export const ReportsPage: React.FC = () => {
         <DefaultButton iconProps={{ iconName: 'ExcelDocument' }} text="Export leaderboard" onClick={() => exportCsv('sales-leaderboard.csv', board.map(b => ({ ...b })))} />
       </Stack>
       <div className="crm-kpi-grid">
-        <div className="crm-kpi"><div className="crm-kpi-value">{money(sum(won, o => o.amount))}</div><div className="crm-kpi-label">Revenue won</div><div className="crm-kpi-hint">{won.length} deals</div></div>
+        <div className="crm-kpi"><div className="crm-kpi-value">{money(sum(won, o => engine.baseAmount(o)))}</div><div className="crm-kpi-label">Revenue won</div><div className="crm-kpi-hint">{won.length} deals</div></div>
         <div className="crm-kpi"><div className="crm-kpi-value">{closed.length ? Math.round((won.length / closed.length) * 100) : 0}%</div><div className="crm-kpi-label">Win rate</div><div className="crm-kpi-hint">{lost.length} lost</div></div>
-        <div className="crm-kpi"><div className="crm-kpi-value">{money(won.length ? sum(won, o => o.amount) / won.length : 0)}</div><div className="crm-kpi-label">Average deal size</div></div>
+        <div className="crm-kpi"><div className="crm-kpi-value">{money(won.length ? sum(won, o => engine.baseAmount(o)) / won.length : 0)}</div><div className="crm-kpi-label">Average deal size</div></div>
         <div className="crm-kpi"><div className="crm-kpi-value">{cycle} days</div><div className="crm-kpi-label">Average sales cycle</div></div>
         <div className="crm-kpi"><div className="crm-kpi-value">{leads.length}</div><div className="crm-kpi-label">Leads created</div><div className="crm-kpi-hint">{leads.length ? Math.round((leads.filter(l => l.status === 'Converted').length / leads.length) * 100) : 0}% converted</div></div>
         <div className="crm-kpi"><div className="crm-kpi-value">{demos.filter(d => d.status === 'Completed').length}/{demos.length}</div><div className="crm-kpi-label">Demos completed</div><div className="crm-kpi-hint">{demos.filter(d => d.status === 'No-show').length} no-shows</div></div>

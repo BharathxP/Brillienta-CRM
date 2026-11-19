@@ -1,3 +1,4 @@
+import { tr } from '../../i18n';
 import * as React from 'react';
 import {
   ActionButton, DatePicker, DayOfWeek, IPersonaProps, ITag, Label, NormalPeoplePicker, Stack, TagPicker, TextField
@@ -135,7 +136,7 @@ const AUTO: Record<string, Tone> = {
 export const Pill: React.FC<{ text?: string; tone?: Tone; icon?: string }> = ({ text, tone }) => {
   if (!text) { return null; }
   const [bg, fg] = TONES[tone || AUTO[text] || 'neutral'];
-  return <span className="crm-pill" style={{ background: bg, color: fg }} title={text}>{text}</span>;
+  return <span className="crm-pill" style={{ background: bg, color: fg }} title={tr(text)}>{tr(text)}</span>;
 };
 
 export const ScoreBadge: React.FC<{ score?: number }> = ({ score }) => {

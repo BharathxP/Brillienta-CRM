@@ -24,6 +24,34 @@ export interface ISequence {
   autoSend: boolean;
 }
 
+export interface ITeam {
+  id: string;
+  name: string;
+  manager?: IUserRef;
+  members: IUserRef[];
+  /** Countries (as written on leads, case-insensitive) routed to this team. */
+  territories: string[];
+  /** Round-robin position for territory routing. */
+  lastIndex: number;
+}
+
+export interface ICurrencyRate {
+  code: string;
+  /** Units of the company currency for 1 unit of this currency. */
+  rate: number;
+}
+
+export interface IPriceBook {
+  id: string;
+  name: string;
+  currency: string;
+  /** Discount applied to list prices (after currency conversion) when no specific price is set. */
+  discountPct: number;
+  /** Product id → price in the price book currency. */
+  prices: Record<string, number>;
+  active: boolean;
+}
+
 export interface IWebhook {
   id: string;
   name: string;
@@ -115,7 +143,11 @@ export interface ICrmSettings {
   webhooks: IWebhook[];
   emailTemplates: IEmailTemplate[];
   sequences: ISequence[];
-  service: { surveyUrl: string; surveyOnResolve: boolean };
+  currencies: ICurrencyRate[];
+  enrichment: { autoNewLeads: boolean };
+  teams: ITeam[];
+  priceBooks: IPriceBook[];
+  service: { surveyUrl: string; surveyOnResolve: boolean; portalUrl: string };
   marketing: { unsubscribeUrl: string; footer: string; requireLeadOptIn: boolean; secondsBetweenEmails: number };
   whatsapp: {
     enabled: boolean;
@@ -134,6 +166,8 @@ export interface ICrmSettings {
   payments: { provider: 'none' | 'Razorpay' | 'Stripe' };
   accounting: { tallySalesLedger: string; tallyTaxLedger: string; xeroSalesAccount: string; xeroTaxType: string };
   groups: { admins: string; managers: string; sales: string; support: string; readers: string };
+  /** SharePoint item-level permissions: reps only reach their own (and optionally their team's) records. */
+  security: { itemLevel: boolean; teamAccess: 'none' | 'read' | 'edit' };
 }
 
 export const WEBHOOK_EVENTS = [
@@ -198,8 +232,12 @@ export function defaultSettings(): ICrmSettings {
         { id: 'pay', name: 'Payment reminder', body: 'Hi {{firstName}}, a friendly reminder that invoice {{invoiceNumber}} ({{total}}) is due. Pay online: {{paymentLink}}', cloudName: 'crm_payment_reminder', language: 'en', params: ['firstName', 'invoiceNumber', 'total', 'paymentLink'] }
       ]
     },
-    service: { surveyUrl: '', surveyOnResolve: true },
+    service: { surveyUrl: '', surveyOnResolve: true, portalUrl: '' },
     marketing: { unsubscribeUrl: '', footer: '', requireLeadOptIn: true, secondsBetweenEmails: 2 },
+    currencies: [],
+    enrichment: { autoNewLeads: true },
+    teams: [],
+    priceBooks: [],
     sequences: [
       {
         id: 'new-lead', name: 'New lead – 14 days', autoSend: false,
@@ -242,6 +280,7 @@ export function defaultSettings(): ICrmSettings {
     renewals: { leadDays: 60, autoCreateOpportunities: true },
     payments: { provider: 'none' },
     accounting: { tallySalesLedger: 'Sales', tallyTaxLedger: 'Output GST', xeroSalesAccount: '200', xeroTaxType: 'OUTPUT' },
+    security: { itemLevel: false, teamAccess: 'read' },
     groups: { admins: 'CRM Administrators', managers: 'CRM Sales Managers', sales: 'CRM Sales', support: 'CRM Support', readers: 'CRM Readers' }
   };
 }
@@ -260,6 +299,8 @@ export function mergeSettings(saved: Partial<ICrmSettings> | undefined): ICrmSet
   out.quote = { ...d.quote, ...(saved.quote || {}) };
   out.whatsapp = { ...d.whatsapp, ...(saved.whatsapp || {}) };
   out.service = { ...d.service, ...(saved.service || {}) };
+  out.security = { ...d.security, ...(saved.security || {}) };
+  out.enrichment = { ...d.enrichment, ...(saved.enrichment || {}) };
   out.marketing = { ...d.marketing, ...(saved.marketing || {}) };
   out.invoice = { ...d.invoice, ...(saved.invoice || {}) };
   out.renewals = { ...d.renewals, ...(saved.renewals || {}) };

@@ -34,8 +34,9 @@ export const Card: React.FC<{ title: string; action?: React.ReactNode; children?
 export const Dashboard: React.FC = () => {
   const { engine, currency, navigate, open, settings } = useCrm();
   const { rows } = useEntities('leads', 'opportunities', 'demos', 'activities', 'cases', 'accounts', 'subscriptions', 'invoices');
-  const [scope, setScope] = React.useState<'all' | 'me'>(engine.role === 'sales' ? 'me' : 'all');
-  const mine = (r: IRecord): boolean => scope === 'all' || r.owner?.id === engine.me?.id;
+  const [scope, setScope] = React.useState<string>(engine.role === 'sales' ? 'me' : 'all');
+  const teamIds = scope.indexOf('team:') === 0 ? engine.teamMemberIds(scope.slice(5)) : [];
+  const mine = (r: IRecord): boolean => scope === 'all' || (scope === 'me' ? r.owner?.id === engine.me?.id : !!r.owner && teamIds.indexOf(r.owner.id) >= 0);
   const leads = rows('leads').filter(mine);
   const opps = rows('opportunities').filter(mine);
   const demos = rows('demos').filter(mine);
@@ -48,8 +49,8 @@ export const Dashboard: React.FC = () => {
   const pq = quarterRange(-1, settings.fiscalYearStartMonth);
   const wonQ = opps.filter(o => o.stage === WON && inRange(o.actualCloseDate, q.start, q.end));
   const wonPQ = opps.filter(o => o.stage === WON && inRange(o.actualCloseDate, pq.start, pq.end));
-  const wonQv = sum(wonQ, o => o.amount);
-  const wonPQv = sum(wonPQ, o => o.amount);
+  const wonQv = sum(wonQ, o => engine.baseAmount(o));
+  const wonPQv = sum(wonPQ, o => engine.baseAmount(o));
   const closed = opps.filter(o => o.stage === WON || o.stage === LOST);
   const winRate = closed.length ? Math.round((closed.filter(o => o.stage === WON).length / closed.length) * 100) : 0;
   const leadsQ = leads.filter(l => inRange(l.created, q.start, q.end)).length;
@@ -57,7 +58,7 @@ export const Dashboard: React.FC = () => {
   const openCases = cases.filter(c => c.caseStatus !== 'Resolved' && c.caseStatus !== 'Closed');
   const breached = openCases.filter(c => slaBreached(c));
   const liveSubs = rows('subscriptions').filter(mine).filter(x => x.subStatus === 'Active' || x.subStatus === 'Pending renewal');
-  const mrr = sum(liveSubs, x => x.mrr);
+  const mrr = sum(liveSubs, x => engine.toBase(x.mrr, x.currency));
   const renewSoon = liveSubs.filter(x => x.renewalDate && new Date(x.renewalDate).getTime() - Date.now() < settings.renewals.leadDays * 86400000);
   const unpaid = rows('invoices').filter(mine).filter(x => x.invoiceStatus === 'Sent' || x.invoiceStatus === 'Overdue');
   const overdueInv = unpaid.filter(x => x.invoiceStatus === 'Overdue');
@@ -68,10 +69,10 @@ export const Dashboard: React.FC = () => {
   for (let i = 11; i >= 0; i--) {
     const s = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const e = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
-    months.push({ label: monthLabel(s), short: s.toLocaleDateString(undefined, { month: 'short' }), value: sum(opps.filter(o => o.stage === WON && inRange(o.actualCloseDate, s, e)), o => o.amount) });
+    months.push({ label: monthLabel(s), short: s.toLocaleDateString(undefined, { month: 'short' }), value: sum(opps.filter(o => o.stage === WON && inRange(o.actualCloseDate, s, e)), o => engine.baseAmount(o)) });
   }
 
-  const byStage = engine.openStages().map(st => ({ label: st, value: sum(open_.filter(o => o.stage === st), o => o.amount), hint: `${open_.filter(o => o.stage === st).length} deals` }));
+  const byStage = engine.openStages().map(st => ({ label: st, value: sum(open_.filter(o => o.stage === st), o => engine.baseAmount(o)), hint: `${open_.filter(o => o.stage === st).length} deals` }));
   const bySource = groupCount(leads, l => l.leadSource);
   const funnel = [
     { label: 'Leads', value: leads.length },
@@ -85,23 +86,23 @@ export const Dashboard: React.FC = () => {
   const upcoming = demos.filter(d => d.status === 'Scheduled' && d.scheduledDate && new Date(d.scheduledDate).getTime() > Date.now() - 3600000)
     .sort((a, b) => String(a.scheduledDate).localeCompare(String(b.scheduledDate))).slice(0, 5);
   const hotLeads = leads.filter(l => l.status !== 'Converted' && l.status !== 'Unqualified').sort((a, b) => (b.leadScore || 0) - (a.leadScore || 0)).slice(0, 6);
-  const topDeals = [...open_].sort((a, b) => (b.amount || 0) - (a.amount || 0)).slice(0, 6);
+  const topDeals = [...open_].sort((a, b) => engine.baseAmount(b) - engine.baseAmount(a)).slice(0, 6);
 
   return (
     <Stack tokens={{ childrenGap: 16 }}>
       <Stack horizontal horizontalAlign="space-between" verticalAlign="center" wrap>
         <Text variant="large" styles={{ root: { fontWeight: 600 } }}>Good {now.getHours() < 12 ? 'morning' : now.getHours() < 18 ? 'afternoon' : 'evening'}, {(engine.me?.title || '').split(' ')[0]}</Text>
-        <Dropdown selectedKey={scope} ariaLabel="Scope" styles={{ root: { width: 160 } }} onChange={(_, o) => setScope(o?.key as 'all' | 'me')}
-          options={[{ key: 'all', text: 'Whole team' }, { key: 'me', text: 'My records' }]} />
+        <Dropdown selectedKey={scope} ariaLabel="Scope" styles={{ root: { width: 160 } }} onChange={(_, o) => setScope(String(o?.key))}
+          options={[{ key: 'all', text: 'Whole company' }, ...(engine.role === 'sales' ? engine.teamsOf(engine.me?.id) : settings.teams).map(t => ({ key: `team:${t.id}`, text: `Team ${t.name}` })), { key: 'me', text: 'My records' }]} />
       </Stack>
       <div className="crm-kpi-grid">
         <Kpi icon="Trophy2" label={`Won ${q.label}`} value={money(wonQv)} delta={wonPQv ? ((wonQv - wonPQv) / wonPQv) * 100 : undefined} hint={`vs ${money(wonPQv)} last quarter`} onClick={() => navigate('forecast')} />
-        <Kpi icon="Money" label="Open pipeline" value={money(sum(open_, o => o.amount))} hint={`${open_.length} deals · weighted ${money(sum(open_, o => (o.amount * (o.probability || 0)) / 100))}`} onClick={() => navigate('entity:opportunities')} />
+        <Kpi icon="Money" label="Open pipeline" value={money(sum(open_, o => engine.baseAmount(o)))} hint={`${open_.length} deals · weighted ${money(sum(open_, o => (engine.baseAmount(o) * (o.probability || 0)) / 100))}`} onClick={() => navigate('entity:opportunities')} />
         <Kpi icon="People" label={`New leads ${q.label}`} value={leadsQ} delta={leadsPQ ? ((leadsQ - leadsPQ) / leadsPQ) * 100 : undefined} hint={`${leads.filter(l => l.status === 'New').length} still new`} onClick={() => navigate('entity:leads')} />
         <Kpi icon="Presentation" label="Demos to schedule" value={demos.filter(d => d.status === 'Requested').length} hint={`${upcoming.length} upcoming`} onClick={() => navigate('entity:demos')} />
         <Kpi icon="Org" label="Win rate" value={`${winRate}%`} hint={`${closed.length} closed deals`} onClick={() => navigate('reports')} />
         {liveSubs.length > 0 && <Kpi icon="RecurringEvent" label="MRR" value={money(mrr)} hint={`ARR ${money(mrr * 12)} · ${renewSoon.length} renewal${renewSoon.length === 1 ? '' : 's'} due`} onClick={() => navigate('entity:subscriptions')} />}
-        {(unpaid.length > 0 || rows('invoices').length > 0) && <Kpi icon="Money" label="Unpaid invoices" value={money(sum(unpaid, x => (x.grandTotal || 0) - (x.amountPaid || 0)))} hint={overdueInv.length ? `${overdueInv.length} overdue` : `${unpaid.length} open`} onClick={() => navigate('entity:invoices')} />}
+        {(unpaid.length > 0 || rows('invoices').length > 0) && <Kpi icon="Money" label="Unpaid invoices" value={money(sum(unpaid, x => engine.toBase((x.grandTotal || 0) - (x.amountPaid || 0), x.currency)))} hint={overdueInv.length ? `${overdueInv.length} overdue` : `${unpaid.length} open`} onClick={() => navigate('entity:invoices')} />}
         {engine.hasFeature('cases') && <Kpi icon="Headset" label="Open cases" value={openCases.length} hint={breached.length ? `${breached.length} SLA breached` : 'all within SLA'} onClick={() => navigate('entity:cases')} />}
       </div>
 
@@ -134,7 +135,7 @@ export const Dashboard: React.FC = () => {
           {topDeals.map(o => (
             <div key={o.id} className="crm-list-row" role="button" tabIndex={0} onClick={() => open('opportunities', o)} onKeyDown={e => { if (e.key === 'Enter') { open('opportunities', o); } }}>
               <Stack horizontal horizontalAlign="space-between" tokens={{ childrenGap: 8 }}>
-                <Text styles={{ root: { fontWeight: 600 } }}>{o.title}</Text><Text>{money(o.amount)}</Text>
+                <Text styles={{ root: { fontWeight: 600 } }}>{o.title}</Text><Text>{fmtMoney(o.amount || 0, o.currency || currency)}</Text>
               </Stack>
               <Text variant="small" className="crm-muted"><Pill text={o.stage} /> {o.probability}% · close {fmtDate(o.expectedCloseDate)} · {o.owner?.title || 'Unassigned'}</Text>
             </div>

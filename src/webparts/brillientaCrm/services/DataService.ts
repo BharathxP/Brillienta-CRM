@@ -1,4 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { isNetworkError, offlineStore } from './OfflineStore';
+import { tr } from '../i18n';
 import { SPHttpClient } from '@microsoft/sp-http';
 import { SpRest } from './SpRest';
 import {
@@ -23,7 +25,12 @@ export function buildEntityDefs(settings: ICrmSettings, listNames: Partial<Recor
       key: `cf_${c.key}`, column: `cf${c.key}`, label: c.label, type: c.type, choices: c.choices,
       section: 'Additional information', grid: !!c.grid, filter: c.type === 'choice', custom: true
     }));
-    return { ...e, listTitle: listNames[e.key] || e.listTitle, fields: [...e.fields, ...custom] };
+    // Labels in the user's language (column names and keys never change).
+    return {
+      ...e, singular: tr(e.singular), plural: tr(e.plural), description: tr(e.description), listTitle: listNames[e.key] || e.listTitle,
+      related: e.related?.map(r => ({ ...r, label: tr(r.label) })),
+      fields: [...e.fields, ...custom].map(f => ({ ...f, label: tr(f.label), section: f.section ? tr(f.section) : f.section }))
+    };
   });
 }
 
@@ -164,6 +171,12 @@ export class DataService {
   }
 
   // ------------------------------------------------------------------ settings
+
+  /** Uses settings saved on this device (offline start). */
+  public useSettings(s: ICrmSettings): void {
+    this.settings = mergeSettings(s);
+    this.defs = buildEntityDefs(this.settings, this.listNames);
+  }
 
   public async loadSettings(): Promise<ICrmSettings> {
     const res: any = await this.rest.get(`${this.items('settings')}?$select=Id,Title,Value&$filter=Title eq 'settings'&$top=1`);
@@ -321,6 +334,52 @@ export class DataService {
     return ids;
   }
 
+  // ------------------------------------------------------------------ item-level security
+
+  private secCache?: { groups: Record<string, number>; read: number; contribute: number; full: number };
+
+  private async securityIds(): Promise<{ groups: Record<string, number>; read: number; contribute: number; full: number }> {
+    if (this.secCache) { return this.secCache; }
+    const g = this.settings.groups;
+    const groups: Record<string, number> = {};
+    for (const [k, name] of [['admins', g.admins], ['managers', g.managers], ['support', g.support], ['readers', g.readers]] as [string, string][]) {
+      try { groups[k] = ((await this.rest.get(`/_api/web/sitegroups/getbyname('${encodeURIComponent(name.replace(/'/g, "''"))}')?$select=Id`)) as any).Id; } catch { /* group not created yet */ }
+    }
+    const roleDef = async (type: number): Promise<number> => ((await this.rest.get(`/_api/web/roledefinitions/getbytype(${type})?$select=Id`)) as any).Id;
+    const [read, contribute, full] = await Promise.all([roleDef(2), roleDef(3), roleDef(5)]);
+    this.secCache = { groups, read, contribute, full };
+    return this.secCache;
+  }
+
+  /**
+   * Gives one record its own permissions: CRM admins (full), managers (edit), support (edit on cases, read
+   * otherwise), readers (read), the owner (edit) and the given extra users. The Sales group gets no access,
+   * so reps reach only records shared with them. Needs Manage Permissions (CRM administrators).
+   */
+  public async secureItem(key: EntityKey, id: number, ownerId: number, extra: { userId: number; edit: boolean }[]): Promise<void> {
+    const ids = await this.securityIds();
+    const item = `${this.items(key)}(${id})`;
+    await this.rest.post(`${item}/breakroleinheritance(copyRoleAssignments=false,clearSubscopes=true)`);
+    const grant = async (principal: number | undefined, role: number): Promise<void> => {
+      if (principal) { await this.rest.post(`${item}/roleassignments/addroleassignment(principalid=${principal},roledefid=${role})`); }
+    };
+    await grant(ids.groups.admins, ids.full);
+    await grant(ids.groups.managers, ids.contribute);
+    await grant(ids.groups.support, key === 'cases' ? ids.contribute : ids.read);
+    await grant(ids.groups.readers, ids.read);
+    await grant(ownerId, ids.contribute);
+    for (const x of extra) { if (x.userId !== ownerId) { await grant(x.userId, x.edit ? ids.contribute : ids.read); } }
+    // Remember who it is secured for without changing Modified / Modified by.
+    await this.rest.post(`${item}/ValidateUpdateListItem`, { formValues: [{ FieldName: 'SecuredOwner', FieldValue: String(ownerId) }], bNewDocumentUpdate: true });
+  }
+
+  /** Back to the list's permissions (when item-level security is switched off). */
+  public async unsecureItem(key: EntityKey, id: number): Promise<void> {
+    const item = `${this.items(key)}(${id})`;
+    await this.rest.post(`${item}/resetroleinheritance`);
+    await this.rest.post(`${item}/ValidateUpdateListItem`, { formValues: [{ FieldName: 'SecuredOwner', FieldValue: '' }], bNewDocumentUpdate: true });
+  }
+
   // ------------------------------------------------------------------ records
 
   private selectFor(d: IEntityDef): { select: string; expand: string } {
@@ -380,11 +439,29 @@ export class DataService {
     return body;
   }
 
+  /** Set while lists are served from the offline copy: when that copy was saved. */
+  public offlineSince?: string;
+  public onOfflineChange?: () => void;
+
+  public get cacheScope(): string { return this.rest.webUrl.toLowerCase(); }
+
   public async getAll(key: EntityKey): Promise<IRecord[]> {
     const d = this.def(key);
     const { select, expand } = this.selectFor(d);
-    const items = await this.rest.getAll(`${this.items(key)}?$select=${select}&$expand=${expand}&$top=2000&$orderby=Id desc`);
-    return items.map(i => this.fromSp(d, i));
+    const cacheKey = `${this.cacheScope}|list|${key}`;
+    try {
+      const items = await this.rest.getAll(`${this.items(key)}?$select=${select}&$expand=${expand}&$top=2000&$orderby=Id desc`);
+      const rows = items.map(i => this.fromSp(d, i));
+      offlineStore.put(cacheKey, { at: new Date().toISOString(), rows }).catch(() => undefined);
+      if (this.offlineSince) { this.offlineSince = undefined; this.onOfflineChange?.(); }
+      return rows;
+    } catch (e) {
+      if (!isNetworkError(e)) { throw e; }
+      const cached = await offlineStore.get<{ at: string; rows: IRecord[] }>(cacheKey);
+      if (!cached) { throw new Error('You are offline and this list has not been opened on this device before.'); }
+      if (!this.offlineSince || cached.at < this.offlineSince) { this.offlineSince = cached.at; this.onOfflineChange?.(); }
+      return cached.rows;
+    }
   }
 
   public async getOne(key: EntityKey, id: number): Promise<IRecord> {
