@@ -7,6 +7,23 @@ export interface IStageDef {
   forecast: string;
 }
 
+export interface ISequenceStep {
+  /** Days after enrolment. */
+  day: number;
+  type: 'Email' | 'Call' | 'Task' | 'WhatsApp';
+  /** Email template id (Email steps) or WhatsApp template id. */
+  templateId?: string;
+  title: string;
+}
+
+export interface ISequence {
+  id: string;
+  name: string;
+  steps: ISequenceStep[];
+  /** Send email steps automatically from the owner's mailbox (when the owner has the CRM open); otherwise a task is created. */
+  autoSend: boolean;
+}
+
 export interface IWebhook {
   id: string;
   name: string;
@@ -97,6 +114,9 @@ export interface ICrmSettings {
   };
   webhooks: IWebhook[];
   emailTemplates: IEmailTemplate[];
+  sequences: ISequence[];
+  service: { surveyUrl: string; surveyOnResolve: boolean };
+  marketing: { unsubscribeUrl: string; footer: string; requireLeadOptIn: boolean; secondsBetweenEmails: number };
   whatsapp: {
     enabled: boolean;
     /** "click": opens WhatsApp with the message ready (free, any number). "cloud": sends through the WhatsApp Business Cloud API flow. */
@@ -178,6 +198,20 @@ export function defaultSettings(): ICrmSettings {
         { id: 'pay', name: 'Payment reminder', body: 'Hi {{firstName}}, a friendly reminder that invoice {{invoiceNumber}} ({{total}}) is due. Pay online: {{paymentLink}}', cloudName: 'crm_payment_reminder', language: 'en', params: ['firstName', 'invoiceNumber', 'total', 'paymentLink'] }
       ]
     },
+    service: { surveyUrl: '', surveyOnResolve: true },
+    marketing: { unsubscribeUrl: '', footer: '', requireLeadOptIn: true, secondsBetweenEmails: 2 },
+    sequences: [
+      {
+        id: 'new-lead', name: 'New lead – 14 days', autoSend: false,
+        steps: [
+          { day: 0, type: 'Email', templateId: 'intro', title: 'Introduction email' },
+          { day: 2, type: 'Call', title: 'Discovery call' },
+          { day: 5, type: 'Email', templateId: 'followup', title: 'Follow-up email' },
+          { day: 9, type: 'WhatsApp', templateId: 'hello', title: 'WhatsApp check-in' },
+          { day: 14, type: 'Task', title: 'Last attempt: qualify or disqualify' }
+        ]
+      }
+    ],
     emailTemplates: [
       {
         id: 'intro', name: 'Introduction',
@@ -225,6 +259,8 @@ export function mergeSettings(saved: Partial<ICrmSettings> | undefined): ICrmSet
   out.integrations = { ...d.integrations, ...(saved.integrations || {}) };
   out.quote = { ...d.quote, ...(saved.quote || {}) };
   out.whatsapp = { ...d.whatsapp, ...(saved.whatsapp || {}) };
+  out.service = { ...d.service, ...(saved.service || {}) };
+  out.marketing = { ...d.marketing, ...(saved.marketing || {}) };
   out.invoice = { ...d.invoice, ...(saved.invoice || {}) };
   out.renewals = { ...d.renewals, ...(saved.renewals || {}) };
   out.payments = { ...d.payments, ...(saved.payments || {}) };

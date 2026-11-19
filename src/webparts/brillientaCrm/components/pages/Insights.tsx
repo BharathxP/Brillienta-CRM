@@ -217,6 +217,9 @@ export const ReportsPage: React.FC = () => {
   const cs = rows('cases').filter(created);
   const resolved = cs.filter(c => c.resolvedDate);
   const slaMet = resolved.filter(c => !c.slaDue || new Date(c.resolvedDate).getTime() <= new Date(c.slaDue).getTime()).length;
+  const rated = resolved.filter(c => Number(c.csatScore) > 0);
+  const surveyed = resolved.filter(c => c.csatSentAt);
+  const csat = rated.length ? Math.round((rated.filter(c => Number(c.csatScore) >= 4).length / rated.length) * 100) : undefined;
   const avgRes = resolved.length ? Math.round(sum(resolved, c => (new Date(c.resolvedDate).getTime() - new Date(String(c.created)).getTime()) / 3600000) / resolved.length) : 0;
 
   const demos = rows('demos').filter(created);
@@ -286,7 +289,7 @@ export const ReportsPage: React.FC = () => {
         {engine.hasFeature('cases') && (
           <Card title="Service performance">
             <BarList data={['Critical', 'High', 'Normal', 'Low'].map(p => ({ label: p, value: cs.filter(c => c.priority === p).length }))} />
-            <Text variant="small" block style={{ marginTop: 8 }}>SLA met: <b>{resolved.length ? Math.round((slaMet / resolved.length) * 100) : 0}%</b> · Avg. resolution: <b>{avgRes} h</b> · Open: <b>{cs.filter(c => !c.resolvedDate).length}</b></Text>
+            <Text variant="small" block style={{ marginTop: 8 }}>SLA met: <b>{resolved.length ? Math.round((slaMet / resolved.length) * 100) : 0}%</b> · Avg. resolution: <b>{avgRes} h</b> · Open: <b>{cs.filter(c => !c.resolvedDate).length}</b>{surveyed.length > 0 && <> · CSAT: <b>{csat === undefined ? '—' : `${csat}%`}</b> satisfied (avg {rated.length ? (sum(rated, c => Number(c.csatScore)) / rated.length).toFixed(1) : '—'}/5, {rated.length}/{surveyed.length} answered)</>}</Text>
           </Card>
         )}
       </div>

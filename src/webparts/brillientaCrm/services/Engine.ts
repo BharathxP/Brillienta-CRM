@@ -41,8 +41,8 @@ export interface IConvertOptions {
 }
 
 const SALES_EDIT: EntityKey[] = ['leads', 'accounts', 'contacts', 'opportunities', 'quotes', 'demos', 'activities', 'cases', 'subscriptions', 'invoices'];
-const SUPPORT_EDIT: EntityKey[] = ['cases', 'contacts', 'accounts', 'activities'];
-const ENTERPRISE_FEATURES = ['cases', 'campaigns', 'forecast', 'webhooks', 'customFields', 'audit', 'security'];
+const SUPPORT_EDIT: EntityKey[] = ['cases', 'contacts', 'accounts', 'activities', 'articles'];
+const ENTERPRISE_FEATURES = ['cases', 'articles', 'campaigns', 'forecast', 'webhooks', 'customFields', 'audit', 'security'];
 
 export function quoteTotals(items: ILineItem[] = []): IQuoteTotals {
   let subtotal = 0;
@@ -416,6 +416,10 @@ export class Engine {
       const ev = key === 'demos' ? 'demo.requested' : `${d.singular.toLowerCase().replace(/\s/g, '')}.created`;
       this.webhooks.emit(ev, data, summary(`New ${d.singular.toLowerCase()}`));
     }
+    if ((key === 'leads' || key === 'contacts') && prev && (!!prev.marketingConsent !== !!x.marketingConsent || !!prev.unsubscribed !== !!x.unsubscribed)) {
+      const what = !!prev.unsubscribed !== !!x.unsubscribed ? (x.unsubscribed ? 'Unsubscribed from marketing' : 'Re-subscribed to marketing') : (x.marketingConsent ? 'Marketing consent given' : 'Marketing consent withdrawn');
+      this.logActivity(key, x.id!, `Consent: ${what}`, `Recorded by ${this.me?.title || 'the CRM'} on ${new Date().toISOString()}.`).catch(() => undefined);
+    }
     if (key === 'leads' && prev && x.owner && prev.owner?.id !== x.owner.id) {
       this.webhooks.emit('lead.assigned', data, `${x.title} assigned to ${x.owner.title}`);
     }
@@ -447,6 +451,10 @@ export class Engine {
     }
     if (key === 'opportunities' && x.dealType === 'Renewal' && x.subscriptionRef && prev && prev.stage !== x.stage && (x.stage === WON || x.stage === LOST)) {
       this.applyRenewalOutcome(x).catch(() => undefined);
+    }
+    if (key === 'cases' && prev && prev.caseStatus !== x.caseStatus && x.caseStatus === 'Resolved' && !x.csatSentAt &&
+      this.settings.service.surveyOnResolve && this.settings.service.surveyUrl && this.graph.available && this.settings.integrations.graphEmail) {
+      this.sendSurvey(x).catch(() => undefined);
     }
     if (key === 'cases' && prev && prev.caseStatus !== x.caseStatus && x.caseStatus === 'Resolved') {
       this.webhooks.emit('case.resolved', data, summary('Case resolved'));
@@ -771,6 +779,240 @@ export class Engine {
         `✍ Quote signed: ${q.quoteNumber} by ${q.signatureName} (${q.grandTotal} ${this.settings.currency})`);
     }
     return todo.length;
+  }
+
+  // ------------------------------------------------------------------ GDPR / privacy
+
+  /** Everything the CRM holds about a person (data subject access request), as JSON. */
+  public async personalData(key: EntityKey, r: IRecord): Promise<Record<string, unknown>> {
+    await this.ensure(['activities', 'opportunities', 'quotes', 'cases', 'demos', 'leads', 'contacts']);
+    const email = String(r.email || '').toLowerCase();
+    const label = (k: EntityKey, x: IRecord): Record<string, unknown> => {
+      const o: Record<string, unknown> = { id: x.id, created: x.created, modified: x.modified };
+      this.def(k).fields.filter(f => f.type !== 'json' && x[f.key] !== undefined && x[f.key] !== null && x[f.key] !== '' && f.key.indexOf('Token') < 0 && f.key !== 'signatureToken' && f.key !== 'csatToken')
+        .forEach(f => { const v = x[f.key]; o[f.label] = v && typeof v === 'object' && 'title' in v ? v.title : f.type === 'lookup' ? this.display(f.lookup as EntityKey, v) : v; });
+      return o;
+    };
+    const type = this.def(key).activityName;
+    const mentions = (k: EntityKey, ref: string): IRecord[] => (this.data[k] || []).filter(x => (key === 'contacts' && x[ref] === r.id) || (email && [x.email, x.requesterEmail, x.signatureEmail].some(e => String(e || '').toLowerCase() === email)));
+    const audit = await this.ds.getAudit(key, r.id, 1000).catch(() => []);
+    return {
+      exportedAt: new Date().toISOString(), exportedBy: this.me?.title, company: this.settings.company.name,
+      record: { type: this.def(key).singular, ...label(key, r) },
+      otherRecordsWithSameEmail: [
+        ...(['leads', 'contacts'] as EntityKey[]).filter(k => k !== key).map(k => (this.data[k] || []).filter(x => email && String(x.email || '').toLowerCase() === email).map(x => ({ type: this.def(k).singular, ...label(k, x) })))
+      ].reduce((all, l) => all.concat(l), [] as Record<string, unknown>[]),
+      activities: (this.data.activities || []).filter(a => a.relatedType === type && a.relatedId === r.id).map(a => label('activities', a)),
+      opportunities: mentions('opportunities', 'contactRef').map(x => label('opportunities', x)),
+      quotes: mentions('quotes', 'contactRef').map(x => label('quotes', x)),
+      cases: mentions('cases', 'contactRef').map(x => label('cases', x)),
+      demos: mentions('demos', 'contactRef').map(x => label('demos', x)),
+      changeHistory: audit.map(a => ({ when: a.created, by: a.author?.title, action: a.title, changes: a.changes }))
+    };
+  }
+
+  /**
+   * Right to erasure: removes personal data from the person's record, its timeline, and copies on other
+   * records (deal/case/demo contact details), and permanently deletes the record's audit history.
+   * The record itself stays as "Erased person" so reports and deal history keep working.
+   */
+  public async erasePerson(key: EntityKey, r: IRecord): Promise<number> {
+    if (!this.can('admin')) { throw new Error('Only CRM administrators can erase personal data.'); }
+    await this.ensure(['activities', 'opportunities', 'quotes', 'cases', 'demos']);
+    const email = String(r.email || '').toLowerCase();
+    const label = `Erased person #${r.id}`;
+    const wipe: Record<string, unknown> = {};
+    this.def(key).fields.forEach(f => {
+      if (['email', 'phone', 'url', 'note'].indexOf(f.type) >= 0 || ['firstName', 'lastName', 'jobTitle', 'whatsapp', 'street', 'city', 'postalCode', 'linkedIn', 'birthday', 'rawPayload', 'contactName'].indexOf(f.key) >= 0) {
+        wipe[f.key] = f.type === 'boolean' ? false : undefined;
+      }
+    });
+    Object.assign(wipe, { title: label, firstName: 'Erased', lastName: `#${r.id}`, marketingConsent: false, unsubscribed: true, tags: [] });
+    let n = 0;
+    await this.ds.save(key, { id: r.id, ...wipe });
+    n++;
+    const type = this.def(key).activityName;
+    for (const a of (this.data.activities || []).filter(x => x.relatedType === type && x.relatedId === r.id)) {
+      await this.ds.save('activities', { id: a.id, title: `${a.activityType || 'Activity'} (erased)`, details: '', webLink: '', waTo: '', waParams: undefined });
+      n++;
+    }
+    const scrub: [EntityKey, string[]][] = [['opportunities', ['contactName', 'email', 'phone']], ['demos', ['contactName', 'email', 'phone']], ['cases', ['requesterEmail']], ['quotes', ['signatureEmail', 'signatureName', 'signatureTitle', 'signatureIp', 'signedSnapshot']]];
+    for (const [k, fields] of scrub) {
+      for (const x of (this.data[k] || []).filter(y => (key === 'contacts' && y.contactRef === r.id) || (key === 'leads' && y.leadRef === r.id) || (email && fields.some(f => String(y[f] || '').toLowerCase() === email)))) {
+        const p: Record<string, unknown> = {};
+        fields.forEach(f => { if (x[f]) { p[f] = f === 'signatureName' ? 'Erased' : undefined; } });
+        if (Object.keys(p).length) { await this.ds.save(k, { id: x.id, ...p }); n++; }
+      }
+    }
+    await this.ds.purgeAudit(key, r.id!).catch(() => 0);
+    await this.ds.writeAudit('Erased (GDPR)', key, r.id!, label, undefined);
+    await Promise.all(this.defs.filter(d => this.data[d.key]).map(d => this.refresh(d.key)));
+    return n;
+  }
+
+  // ------------------------------------------------------------------ knowledge base & satisfaction surveys
+
+  /** Published articles that best match a case's subject and description. */
+  public suggestArticles(c: IRecord, max: number = 3): IRecord[] {
+    const stop = new Set(['the', 'and', 'for', 'with', 'not', 'are', 'can', 'how', 'what', 'when', 'our', 'you', 'your', 'this', 'that', 'from', 'have', 'does', 'is', 'to', 'in', 'on', 'of', 'a', 'an', 'it', 'my', 'we', 'i']);
+    const words = (t: string): string[] => String(t || '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2 && !stop.has(w));
+    const q = words(`${c.title} ${c.title} ${String(c.description || '').slice(0, 600)}`);
+    if (!q.length) { return []; }
+    return (this.data.articles || []).filter(a => a.articleStatus === 'Published').map(a => {
+      const head = new Set(words(`${a.title} ${a.keywords || ''}`));
+      const body = new Set(words(String(a.body || '').slice(0, 3000)));
+      let score = q.reduce((t, w) => t + (head.has(w) ? 3 : body.has(w) ? 1 : 0), 0);
+      if (c.category && a.category === c.category) { score += 2; }
+      return { a, score };
+    }).filter(x => x.score >= 3).sort((x, y) => y.score - x.score).slice(0, max).map(x => x.a);
+  }
+
+  public async linkArticle(c: IRecord, article: IRecord): Promise<IRecord> {
+    const saved = await this.patch('cases', c.id!, { articleRef: article.id });
+    await this.ds.save('articles', { id: article.id, useCount: (Number(article.useCount) || 0) + 1 });
+    await this.refresh('articles');
+    return saved;
+  }
+
+  public surveyLink(c: IRecord, rating?: number): string {
+    const base = (this.settings.service.surveyUrl || '').trim();
+    if (!base || !c.csatToken) { return ''; }
+    return `${base}${base.indexOf('?') >= 0 ? '&' : '?'}q=${c.id}&t=${encodeURIComponent(c.csatToken)}${rating ? `&r=${rating}` : ''}`;
+  }
+
+  /** Emails the customer a one-click 1–5 satisfaction survey (served by the flow “Case satisfaction survey”). */
+  public async sendSurvey(c: IRecord): Promise<IRecord> {
+    if (!/^https:\/\//i.test(this.settings.service.surveyUrl || '')) { throw new Error('Set the survey link in Settings › Company › Service first.'); }
+    const to = (c.contactRef ? this.find('contacts', c.contactRef)?.email : '') || c.requesterEmail;
+    if (!to) { throw new Error('The case has no contact email or requester email.'); }
+    const bytes = new Uint8Array(16);
+    window.crypto.getRandomValues(bytes);
+    const token = Array.prototype.map.call(bytes, (b: number) => ('0' + b.toString(16)).slice(-2)).join('');
+    const saved = await this.patch('cases', c.id!, { csatToken: token, csatSentAt: new Date().toISOString() });
+    const links = [5, 4, 3, 2, 1].map(n => `${n} ${['', '😞 Very dissatisfied', '🙁 Dissatisfied', '😐 Neutral', '🙂 Satisfied', '😀 Very satisfied'][n]}: ${this.surveyLink(saved, n)}`).join('\n');
+    const subject = `[${c.caseNumber}] How did we do?`;
+    const body = `Hello,\n\nYour request “${String(c.title || '').replace(/^\s*\[[^\]]+\]\s*/, '')}” has been resolved. How satisfied are you with our support? Click one link:\n\n${links}\n\nThank you,\n${this.settings.company.name || this.me?.title || ''}`;
+    await this.graph.sendMail([to], subject, body, []);
+    await this.logActivity('cases', c.id!, 'Satisfaction survey sent', `To: ${to}`, 'Email');
+    return saved;
+  }
+
+  // ------------------------------------------------------------------ duplicate merge
+
+  /**
+   * Merges `dup` into `master`: copies the chosen field values, moves every reference (lookups on all
+   * record types and the activity timeline) to the master, then deletes the duplicate.
+   */
+  public async mergeRecords(key: EntityKey, master: IRecord, dup: IRecord, take: string[], onProgress?: (msg: string) => void): Promise<IRecord> {
+    if (!this.can('delete', key)) { throw new Error('Only managers and administrators can merge records.'); }
+    if (master.id === dup.id) { throw new Error('Choose two different records.'); }
+    const fields: Record<string, unknown> = {};
+    take.forEach(k => { fields[k] = dup[k]; });
+    // Fill empty master fields from the duplicate automatically.
+    this.def(key).fields.forEach(fd => {
+      const empty = (v: unknown): boolean => v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length);
+      if (!fd.readOnly && !fd.hidden && !(fd.key in fields) && empty(master[fd.key]) && !empty(dup[fd.key])) { fields[fd.key] = dup[fd.key]; }
+    });
+    const saved = await this.patch(key, master.id!, fields);
+    let moved = 0;
+    for (const d of this.defs) {
+      const refs = d.fields.filter(fd => fd.type === 'lookup' && fd.lookup === key);
+      if (!refs.length) { continue; }
+      await this.ensure([d.key]);
+      for (const r of this.data[d.key] || []) {
+        const patch: Record<string, unknown> = {};
+        refs.forEach(fd => { if (r[fd.key] === dup.id) { patch[fd.key] = master.id; } });
+        if (Object.keys(patch).length && !(d.key === key && r.id === dup.id)) { await this.ds.save(d.key, { id: r.id, ...patch }); moved++; }
+      }
+      onProgress?.(`${d.plural}…`);
+    }
+    await this.ensure(['activities']);
+    const type = this.def(key).activityName;
+    for (const a of (this.data.activities || []).filter(x => x.relatedType === type && x.relatedId === dup.id)) {
+      await this.ds.save('activities', { id: a.id, relatedId: master.id });
+      moved++;
+    }
+    await this.remove(key, dup.id!);
+    await this.logActivity(key, master.id!, `Merged with duplicate “${dup.title || dup.email || dup.id}”`, `${moved} linked item(s) moved. Values taken from the duplicate: ${take.map(k => this.def(key).fields.find(f => f.key === k)?.label || k).join(', ') || 'none (empty fields filled)'}.`);
+    await Promise.all(this.defs.filter(d => this.data[d.key]).map(d => this.refresh(d.key)));
+    return this.find(key, master.id) || saved;
+  }
+
+  // ------------------------------------------------------------------ sequences (cadences)
+
+  /** Enrols leads/contacts in a sequence (re-enrolling restarts it). */
+  public async enrollInSequence(key: EntityKey, ids: number[], sequenceId: string, onProgress?: (n: number) => void): Promise<number> {
+    const seq = this.settings.sequences.find(x => x.id === sequenceId);
+    if (!seq || !seq.steps.length) { throw new Error('Choose a sequence with at least one step.'); }
+    const now = new Date();
+    let n = 0;
+    for (const id of ids) {
+      await this.patch(key, id, {
+        sequenceId: seq.id, sequenceName: seq.name, sequenceStatus: 'Active', sequenceStep: 0, sequenceStarted: now.toISOString(),
+        sequenceNextDue: new Date(now.getTime() + (seq.steps[0].day || 0) * DAY).toISOString()
+      });
+      await this.logActivity(key, id, `Enrolled in sequence “${seq.name}”`, seq.steps.map(st => `Day ${st.day}: ${st.type} – ${st.title}`).join('\n'));
+      onProgress?.(++n);
+    }
+    return n;
+  }
+
+  public async stopSequence(key: EntityKey, id: number, status: 'Stopped' | 'Replied' | 'Completed' = 'Stopped'): Promise<IRecord> {
+    return this.patch(key, id, { sequenceStatus: status, sequenceNextDue: undefined });
+  }
+
+  /**
+   * Runs due sequence steps for records the current user owns (admins/managers also run unowned ones).
+   * A reply (email or WhatsApp received after enrolment) stops the sequence. Email steps are sent from the
+   * owner's mailbox when the sequence allows it; other steps become tasks for the owner.
+   */
+  public async runSequences(): Promise<{ sent: number; tasks: number; replied: number }> {
+    const res = { sent: 0, tasks: 0, replied: 0 };
+    if (!this.license?.canWrite || this.role === 'reader') { return res; }
+    await this.ensure(['leads', 'contacts', 'activities']);
+    const now = Date.now();
+    const mine = (r: IRecord): boolean => (r.owner ? r.owner.id === this.me?.id : (this.role === 'admin' || this.role === 'manager'));
+    for (const key of ['leads', 'contacts'] as EntityKey[]) {
+      if (!this.can('edit', key)) { continue; }
+      const due = (this.data[key] || []).filter(r => r.sequenceStatus === 'Active' && r.sequenceNextDue && new Date(r.sequenceNextDue).getTime() <= now && mine(r));
+      for (const r of due) {
+        const seq = this.settings.sequences.find(x => x.id === r.sequenceId);
+        if (!seq) { await this.stopSequence(key, r.id!, 'Stopped'); continue; }
+        const started = new Date(r.sequenceStarted || r.modified || now).getTime();
+        const type = this.def(key).activityName;
+        const replied = (this.data.activities || []).some(a => a.relatedType === type && a.relatedId === r.id && new Date(a.dueDate || a.created).getTime() > started &&
+          ((a.activityType === 'Email' && /^Received:/.test(a.title || '')) || a.waStatus === 'Received'));
+        if (replied) { await this.stopSequence(key, r.id!, 'Replied'); res.replied++; continue; }
+        const idx = Number(r.sequenceStep) || 0;
+        const step = seq.steps[idx];
+        if (step) {
+          const tpl = step.type === 'Email' ? this.settings.emailTemplates.find(t => t.id === step.templateId) : undefined;
+          const canSend = seq.autoSend && !!tpl && !!r.email && this.graph.available && this.settings.integrations.graphEmail && r.owner?.id === this.me?.id;
+          let sent = false;
+          if (canSend) {
+            try { await this.sendEmail(r.email, this.fillTemplate(tpl!.subject, r), this.fillTemplate(tpl!.body, r), { key, id: r.id! }); sent = true; res.sent++; } catch { sent = false; }
+          }
+          if (!sent) {
+            const verb = step.type === 'Email' ? 'Email' : step.type === 'Call' ? 'Call' : step.type === 'WhatsApp' ? 'WhatsApp' : 'Task';
+            await this.ds.save('activities', {
+              title: `${verb}: ${r.title} – ${step.title}`.slice(0, 255), activityType: 'Task', completed: false, dueDate: new Date().toISOString(),
+              details: `Sequence “${seq.name}”, step ${idx + 1} of ${seq.steps.length}.${tpl ? `\nTemplate: ${tpl.name}` : ''}\nseq:${seq.id}:${idx}:${step.type}:${step.templateId || ''}`,
+              relatedType: type, relatedId: r.id, owner: r.owner || this.me, activitySource: 'CRM'
+            });
+            res.tasks++;
+          }
+        }
+        const next = idx + 1;
+        if (next >= seq.steps.length) {
+          await this.patch(key, r.id!, { sequenceStep: next, sequenceStatus: 'Completed', sequenceNextDue: undefined });
+        } else {
+          const at = Math.max(started + (seq.steps[next].day || 0) * DAY, now + 60000);
+          await this.patch(key, r.id!, { sequenceStep: next, sequenceNextDue: new Date(at).toISOString() });
+        }
+      }
+    }
+    if (res.tasks) { await this.refresh('activities'); }
+    return res;
   }
 
   /** Discount as % of subtotal and whether it needs manager approval (Settings › Company › Quotes). */

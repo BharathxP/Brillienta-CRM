@@ -10,10 +10,12 @@ import { useCrm } from '../CrmContext';
 import { FieldEditor, renderValue, choicesFor } from './fields';
 import { Pill, ScoreBadge } from './controls';
 import { ActivityTimeline } from './ActivityTimeline';
-import { ConvertLeadDialog, EmailDialog, MeetingDialog, WhatsAppDialog } from './dialogs';
+import { CallDialog, CampaignEmailDialog, ConvertLeadDialog, EmailDialog, MeetingDialog, MergeDialog, WhatsAppDialog } from './dialogs';
+import { downloadBlob } from '../../services/FlowPackage';
 import { waRecipient } from '../../services/WhatsApp';
 import { QuoteLines, printQuote } from './QuoteLines';
 import { SmartSummary } from './SmartSummary';
+import { KbSuggestions } from './KbSuggestions';
 import { draftFollowUp, INSIGHT_ENTITIES } from '../../services/Insights';
 import { errorText, firstResponseLate, fmtDate, fmtMoney, slaBreached, sum } from '../utils';
 
@@ -66,7 +68,8 @@ export const RecordPanel: React.FC<IProps> = ({ entity, record, onClose, canGoBa
   const [error, setError] = React.useState<string>();
   const [errors, setErrors] = React.useState<Record<string, string>>({});
   const [confirmDelete, setConfirmDelete] = React.useState(false);
-  const [dialog, setDialog] = React.useState<'convert' | 'email' | 'meeting' | 'lost' | 'emailQuote' | 'emailInvoice' | 'emailCase' | 'emailSign' | 'draft' | 'whatsapp'>();
+  const [dialog, setDialog] = React.useState<'convert' | 'email' | 'meeting' | 'lost' | 'emailQuote' | 'emailInvoice' | 'emailCase' | 'emailSign' | 'draft' | 'whatsapp' | 'call' | 'campaignEmail'>();
+  const [kbArticle, setKbArticle] = React.useState<IRecord>();
   const [signLink, setSignLink] = React.useState('');
   const [history, setHistory] = React.useState<IRecord[]>();
   const [tab, setTab] = React.useState('details');
@@ -79,7 +82,8 @@ export const RecordPanel: React.FC<IProps> = ({ entity, record, onClose, canGoBa
   const canEdit = engine.can(isNew ? 'create' : 'edit', entity);
   const set = (key: string, v: any): void => { setDraft(d => ({ ...d, [key]: v })); setDirty(true); };
 
-  const duplicates = (entity === 'leads' || entity === 'contacts' || entity === 'accounts') && (isNew || dirty)
+  const [mergeWith, setMergeWith] = React.useState<IRecord>();
+  const duplicates = (entity === 'leads' || entity === 'contacts' || entity === 'accounts')
     ? engine.findDuplicates(entity, { ...draft, title: entity === 'accounts' ? draft.title : `${draft.firstName || ''} ${draft.lastName || ''}`.trim() })
     : [];
 
@@ -144,6 +148,11 @@ export const RecordPanel: React.FC<IProps> = ({ entity, record, onClose, canGoBa
     const writable = engine.can('edit', entity);
     if (draft.email && (entity !== 'quotes')) {
       cmds.push({ key: 'email', text: 'Email', iconProps: { iconName: 'Mail' }, onClick: () => setDialog('email') });
+    }
+    const callable = ['leads', 'contacts', 'accounts', 'opportunities', 'demos', 'cases'].indexOf(entity) >= 0 &&
+      !!(draft.mobile || draft.phone || (draft.contactRef && (engine.find('contacts', draft.contactRef)?.mobile || engine.find('contacts', draft.contactRef)?.phone)));
+    if (callable && engine.can('create', 'activities')) {
+      cmds.push({ key: 'call', text: 'Call', iconProps: { iconName: 'Phone' }, onClick: () => setDialog('call') });
     }
     if (entity === 'leads' && writable) {
       cmds.push({ key: 'convert', text: 'Convert', iconProps: { iconName: 'Switch' }, disabled: draft.status === 'Converted', onClick: () => setDialog('convert') });
@@ -252,6 +261,9 @@ export const RecordPanel: React.FC<IProps> = ({ entity, record, onClose, canGoBa
       cmds.push({ key: 'renew', text: 'Renew now', iconProps: { iconName: 'Refresh' }, disabled: dirty || draft.subStatus === 'Cancelled', onClick: () => quickPatch({ subStatus: 'Active', renewalDate: addPeriod(draft.renewalDate, draft.billingCycle) }, 'Renewed for one more period.') });
       cmds.push({ key: 'cancel', text: 'Cancel', iconProps: { iconName: 'Cancel' }, disabled: draft.subStatus === 'Cancelled', onClick: () => { if (window.confirm('Cancel this subscription at its renewal date?')) { quickPatch({ subStatus: 'Cancelled', autoRenew: false }, 'Subscription cancelled.'); } } });
     }
+    if (entity === 'campaigns' && writable) {
+      cmds.push({ key: 'cmail', text: 'Send email', iconProps: { iconName: 'Mail' }, disabled: dirty, onClick: () => setDialog('campaignEmail') });
+    }
     if (entity === 'cases' && writable) {
       if (draft.owner?.id !== engine.me?.id) { cmds.push({ key: 'take', text: 'Assign to me', iconProps: { iconName: 'Contact' }, onClick: () => quickPatch({ owner: engine.me, caseStatus: draft.caseStatus === 'New' ? 'In progress' : draft.caseStatus }, 'Case assigned to you.') }); }
       cmds.push({ key: 'resolve', text: 'Resolve', iconProps: { iconName: 'Completed' }, disabled: draft.caseStatus === 'Resolved' || draft.caseStatus === 'Closed', onClick: () => {
@@ -260,6 +272,10 @@ export const RecordPanel: React.FC<IProps> = ({ entity, record, onClose, canGoBa
       } });
       cmds.push({ key: 'reply', text: 'Reply to customer', iconProps: { iconName: 'Reply' }, disabled: dirty, onClick: () => setDialog('emailCase') });
       cmds.push({ key: 'wait', text: 'Waiting on customer', iconProps: { iconName: 'Clock' }, disabled: draft.caseStatus === 'Waiting on customer' || draft.caseStatus === 'Resolved' || draft.caseStatus === 'Closed', onClick: () => quickPatch({ caseStatus: 'Waiting on customer' }, engine.settings.slaPauseWhenWaiting ? 'Waiting on customer: SLA clock paused.' : 'Waiting on customer.') });
+      if ((draft.caseStatus === 'Resolved' || draft.caseStatus === 'Closed') && settings.service.surveyUrl) {
+        cmds.push({ key: 'survey', text: draft.csatSentAt ? 'Resend survey' : 'Send satisfaction survey', iconProps: { iconName: 'Emoji2' }, disabled: dirty || !!draft.csatScore,
+          onClick: () => run(() => engine.sendSurvey(draft).then(x => { setDraft({ ...x }); return 'Satisfaction survey sent.'; })) });
+      }
       cmds.push({ key: 'esc', text: 'Escalate', iconProps: { iconName: 'Warning' }, disabled: draft.priority === 'Critical', onClick: () => quickPatch({ priority: 'Critical' }, 'Case escalated to Critical.') });
     }
     if ((entity === 'accounts' || entity === 'contacts') && engine.can('create', 'opportunities')) {
@@ -267,6 +283,31 @@ export const RecordPanel: React.FC<IProps> = ({ entity, record, onClose, canGoBa
       cmds.push({ key: 'newopp', text: 'New opportunity', iconProps: { iconName: 'Money' }, onClick: () => open('opportunities', { ...base, title: `${draft.title} - new deal` }) });
       if (engine.can('create', 'cases')) { cmds.push({ key: 'newcase', text: 'New case', iconProps: { iconName: 'Headset' }, onClick: () => open('cases', { ...base }) }); }
       if (entity === 'accounts' && engine.can('create', 'contacts')) { cmds.push({ key: 'newcon', text: 'New contact', iconProps: { iconName: 'AddFriend' }, onClick: () => open('contacts', { accountRef: draft.id }) }); }
+    }
+    if ((entity === 'leads' || entity === 'contacts') && writable && settings.sequences.length) {
+      cmds.push({ key: 'seq', text: draft.sequenceStatus === 'Active' ? 'Sequence' : 'Add to sequence', iconProps: { iconName: 'Flow' }, disabled: dirty, subMenuProps: {
+        items: [
+          ...(draft.sequenceStatus === 'Active' ? [{ key: 'stop', text: `Stop “${draft.sequenceName}”`, iconProps: { iconName: 'Stop' }, onClick: () => { run(() => engine.stopSequence(entity, draft.id!).then(x => { setDraft({ ...x }); return 'Sequence stopped.'; })); } }] : []),
+          ...settings.sequences.map(q => ({ key: q.id, text: `${draft.sequenceStatus === 'Active' ? 'Restart with' : 'Enrol in'} “${q.name}”`, onClick: () => {
+            run(() => engine.enrollInSequence(entity, [draft.id!], q.id).then(() => { const x = engine.find(entity, draft.id); if (x) { setDraft({ ...x }); } return `Enrolled in “${q.name}”.`; }));
+          } }))
+        ]
+      } });
+    }
+    if (entity === 'leads' || entity === 'contacts') {
+      cmds.push({ key: 'privacy', text: 'Privacy', iconProps: { iconName: 'Shield' }, subMenuProps: { items: [
+        { key: 'export', text: 'Export personal data (JSON)', iconProps: { iconName: 'Download' }, onClick: () => {
+          engine.personalData(entity, draft).then(d => {
+            downloadBlob(new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' }), `personal-data-${entity}-${draft.id}.json`);
+            engine.logActivity(entity, draft.id!, 'Personal data exported (access request)').catch(() => undefined);
+          }).catch(e => setError(errorText(e)));
+        } },
+        ...(engine.can('admin') ? [{ key: 'erase', text: 'Erase personal data…', iconProps: { iconName: 'UserRemove' }, onClick: () => {
+          const ok = window.prompt(`This permanently removes ${draft.title}'s personal data from this record, its timeline, linked deals, demos, cases and quotes, and deletes its change history. It cannot be undone.\n\nType ERASE to confirm.`);
+          if (ok !== 'ERASE') { return; }
+          run(() => engine.erasePerson(entity, draft).then(n => { const x = engine.find(entity, draft.id); if (x) { setDraft({ ...x }); } return `Personal data erased (${n} item(s) updated).`; }));
+        } }] : [])
+      ] } });
     }
     if (settings.whatsapp.enabled && engine.license?.canWrite && ['leads', 'contacts', 'opportunities', 'demos', 'quotes', 'cases', 'invoices', 'subscriptions'].indexOf(entity) >= 0 && waRecipient(engine, entity, draft).number) {
       cmds.push({ key: 'whatsapp', text: 'WhatsApp', iconProps: { iconName: 'Chat' }, onClick: () => setDialog('whatsapp') });
@@ -278,6 +319,9 @@ export const RecordPanel: React.FC<IProps> = ({ entity, record, onClose, canGoBa
     if (isNew) { return null; }
     const bits: React.ReactNode[] = [];
     if (def.boardField && draft[def.boardField]) { bits.push(<Pill key="b" text={draft[def.boardField]} />); }
+    if ((entity === 'leads' || entity === 'contacts') && draft.sequenceStatus) {
+      bits.push(<span key="sq" className="crm-muted">Sequence {draft.sequenceName}: {draft.sequenceStatus === 'Active' ? `step ${(Number(draft.sequenceStep) || 0) + 1}, next ${fmtDate(draft.sequenceNextDue)}` : draft.sequenceStatus.toLowerCase()}</span>);
+    }
     if (entity === 'leads') { bits.push(<Pill key="r" text={draft.rating} />, <span key="s">Score <ScoreBadge score={draft.leadScore} /></span>); }
     if (entity === 'opportunities') { bits.push(<b key="a">{fmtMoney(draft.amount || 0, currency)}</b>, <span key="p">{draft.probability ?? 0}%</span>, <span key="c">close {fmtDate(draft.expectedCloseDate)}</span>); }
     if (entity === 'invoices') {
@@ -289,7 +333,7 @@ export const RecordPanel: React.FC<IProps> = ({ entity, record, onClose, canGoBa
       bits.push(<Pill key="sig" text={draft.signatureStatus === 'Signed' ? `Signed by ${draft.signatureName}` : `E-signature: ${draft.signatureStatus}`} />);
     }
     if (entity === 'quotes') { bits.push(<b key="q">{draft.quoteNumber}</b>, <b key="t">{fmtMoney(quoteTotals(draft.lineItems || []).grandTotal, currency)}</b>); }
-    if (entity === 'cases') { bits.push(<b key="n">{draft.caseNumber}</b>, <Pill key="pr" text={draft.priority} />); if (slaBreached(draft)) { bits.push(<Pill key="sla" text="Breached" />); } if (draft.slaPausedAt) { bits.push(<span key="pz" className="crm-muted">SLA paused</span>); } if (firstResponseLate(draft)) { bits.push(<Pill key="fr" text="First response late" />); } }
+    if (entity === 'cases') { bits.push(<b key="n">{draft.caseNumber}</b>, <Pill key="pr" text={draft.priority} />); if (slaBreached(draft)) { bits.push(<Pill key="sla" text="Breached" />); } if (draft.slaPausedAt) { bits.push(<span key="pz" className="crm-muted">SLA paused</span>); } if (firstResponseLate(draft)) { bits.push(<Pill key="fr" text="First response late" />); } if (draft.csatScore) { bits.push(<span key="cs">{'★'.repeat(Number(draft.csatScore))}{'☆'.repeat(5 - Number(draft.csatScore))} CSAT</span>); } }
     if (entity === 'accounts') {
       const opps = (data.opportunities || []).filter(o => o.accountRef === draft.id);
       bits.push(<span key="w">Won {fmtMoney(sum(opps.filter(o => o.stage === WON), o => o.amount), currency)}</span>,
@@ -362,13 +406,19 @@ export const RecordPanel: React.FC<IProps> = ({ entity, record, onClose, canGoBa
       {duplicates.length > 0 && (
         <MessageBar messageBarType={MessageBarType.warning} isMultiline>
           Possible duplicate{duplicates.length > 1 ? 's' : ''}:{' '}
-          {duplicates.map((d, i) => <React.Fragment key={d.id}>{i > 0 && ', '}<Link onClick={() => open(entity, d)}>{d.title || d.email}</Link></React.Fragment>)}
+          {duplicates.map((d, i) => (
+            <React.Fragment key={d.id}>{i > 0 && ', '}<Link onClick={() => open(entity, d)}>{d.title || d.email}</Link>
+              {!isNew && !dirty && engine.can('delete', entity) && <> (<Link onClick={() => setMergeWith(d)}>merge into this</Link>)</>}
+            </React.Fragment>
+          ))}
         </MessageBar>
       )}
+      {mergeWith && <MergeDialog entity={entity} master={draft} duplicate={mergeWith} onClose={r => { setMergeWith(undefined); if (r) { setDraft({ ...r }); } }} />}
 
       <Pivot selectedKey={tab} onLinkClick={i => { const k = String(i?.props.itemKey); setTab(k); if (k === 'history') { loadHistory(); } }} overflowBehavior="menu">
         <PivotItem itemKey="details" headerText="Details" itemIcon="Edit">
           {!isNew && INSIGHT_ENTITIES.indexOf(entity) >= 0 && <SmartSummary entity={entity} record={draft} onDraft={() => setDialog('draft')} />}
+          {!isNew && entity === 'cases' && <KbSuggestions caseRecord={draft} onReply={a => { setKbArticle(a); setDialog('emailCase'); }} onLinked={c => setDraft({ ...c })} />}
           <div className="crm-form">
             {Object.keys(sections).map(s => (
               <fieldset key={s} className="crm-section">
@@ -469,9 +519,12 @@ export const RecordPanel: React.FC<IProps> = ({ entity, record, onClose, canGoBa
       {dialog === 'emailCase' && (
         <EmailDialog entity={entity} record={draft} to={engine.find('contacts', draft.contactRef)?.email || draft.requesterEmail || ''}
           subject={`[${draft.caseNumber}] ${String(draft.title || '').replace(/^\s*\[[^\]]+\]\s*/, '')}`}
-          body={`Hello,\n\n\n\nKind regards,\n${engine.me?.title || ''}\n${engine.settings.company.name}\n\nPlease keep [${draft.caseNumber}] in the subject when you reply.`}
-          onClose={() => { setDialog(undefined); const c = engine.find('cases', draft.id); if (c) { setDraft({ ...c }); } }} />
+          body={`Hello,\n\n${kbArticle ? `${kbArticle.body || ''}${/^https:\/\//i.test(kbArticle.publicUrl || '') ? `\n\nMore details: ${kbArticle.publicUrl}` : ''}` : ''}\n\nKind regards,\n${engine.me?.title || ''}\n${engine.settings.company.name}\n\nPlease keep [${draft.caseNumber}] in the subject when you reply.`}
+          onSent={() => { if (kbArticle && !draft.articleRef) { engine.linkArticle(draft, kbArticle).then(c => setDraft({ ...c })).catch(() => undefined); } }}
+          onClose={() => { setDialog(undefined); setKbArticle(undefined); const c = engine.find('cases', draft.id); if (c) { setDraft(d => ({ ...c, articleRef: d.articleRef ?? c.articleRef })); } }} />
       )}
+      {dialog === 'campaignEmail' && <CampaignEmailDialog campaign={draft} onClose={() => { setDialog(undefined); const x = engine.find('campaigns', draft.id); if (x) { setDraft({ ...x }); } }} />}
+      {dialog === 'call' && <CallDialog entity={entity} record={draft} onClose={() => setDialog(undefined)} />}
       {dialog === 'whatsapp' && <WhatsAppDialog entity={entity} record={draft} onClose={() => setDialog(undefined)} />}
       {dialog === 'draft' && (() => {
         const d = draftFollowUp(engine, entity, draft);

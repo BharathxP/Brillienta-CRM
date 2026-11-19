@@ -143,6 +143,14 @@ export const EntityGrid: React.FC<{ entity: EntityKey; title?: string; initialFi
           engine.bulkPatch(entity, selected.map(r => r.id!), { owner: engine.me }).then(() => notify(`Assigned ${sel} to you.`, MessageBarType.success)).catch(e => notify(errorText(e), MessageBarType.error));
         } });
       }
+      if ((entity === 'leads' || entity === 'contacts') && engine.settings.sequences.length) {
+        items.push({ key: 'seq', text: 'Enrol in sequence', iconProps: { iconName: 'Flow' }, subMenuProps: {
+          items: engine.settings.sequences.map(q => ({ key: q.id, text: q.name, onClick: () => {
+            engine.enrollInSequence(entity, selected.map(r => r.id!), q.id).then(n => notify(`${n} record(s) enrolled in “${q.name}”.`, MessageBarType.success))
+              .catch(e => notify(errorText(e), MessageBarType.error));
+          } }))
+        } });
+      }
       if (entity === 'leads' && engine.can('import', entity)) {
         items.push({ key: 'rr', text: 'Round-robin assign', iconProps: { iconName: 'Sync' }, onClick: () => {
           engine.assignRoundRobin(selected.map(r => r.id!)).then(n => notify(`Distributed ${n} lead(s).`, MessageBarType.success)).catch(e => notify(errorText(e), MessageBarType.error));

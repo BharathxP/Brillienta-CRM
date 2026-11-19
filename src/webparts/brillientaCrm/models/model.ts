@@ -39,7 +39,7 @@ export interface IFieldDef {
 
 export type EntityKey =
   | 'leads' | 'accounts' | 'contacts' | 'opportunities' | 'quotes' | 'products'
-  | 'demos' | 'cases' | 'campaigns' | 'activities' | 'subscriptions' | 'invoices';
+  | 'demos' | 'cases' | 'campaigns' | 'activities' | 'subscriptions' | 'invoices' | 'articles';
 
 export type SystemListKey = 'settings' | 'audit';
 export type ListKey = EntityKey | SystemListKey;
@@ -121,6 +121,15 @@ export const ENTITIES: IEntityDef[] = [
       f('email', 'Email', 'email', { section: 'General' }),
       f('phone', 'Phone', 'phone', { section: 'General' }),
       f('whatsapp', 'WhatsApp ID', 'text', { hidden: true }),
+      f('marketingConsent', 'Marketing consent (opt-in)', 'boolean', { section: 'Privacy', filter: true }),
+      f('unsubscribed', 'Unsubscribed from marketing', 'boolean', { section: 'Privacy', filter: true }),
+      f('unsubToken', 'Unsubscribe token', 'text', { hidden: true }),
+      f('sequenceName', 'Sequence', 'text', { section: 'Sequence', readOnly: true, filter: true }),
+      f('sequenceStatus', 'Sequence status', 'choice', { choices: ['Active', 'Completed', 'Replied', 'Stopped'], section: 'Sequence', readOnly: true, filter: true }),
+      f('sequenceStep', 'Sequence step', 'number', { section: 'Sequence', readOnly: true }),
+      f('sequenceNextDue', 'Next sequence step', 'datetime', { section: 'Sequence', readOnly: true }),
+      f('sequenceId', 'Sequence ID', 'text', { hidden: true }),
+      f('sequenceStarted', 'Sequence started', 'datetime', { hidden: true }),
       f('company', 'Company', 'text', { section: 'General', grid: true }),
       f('jobTitle', 'Job title', 'text', { section: 'General' }),
       f('country', 'Country', 'text', { section: 'General', filter: true }),
@@ -193,6 +202,12 @@ export const ENTITIES: IEntityDef[] = [
       f('phone', 'Phone', 'phone', { section: 'General', grid: true }),
       f('mobile', 'Mobile', 'phone', { section: 'General' }),
       f('whatsapp', 'WhatsApp ID', 'text', { hidden: true }),
+      f('sequenceName', 'Sequence', 'text', { section: 'Sequence', readOnly: true, filter: true }),
+      f('sequenceStatus', 'Sequence status', 'choice', { choices: ['Active', 'Completed', 'Replied', 'Stopped'], section: 'Sequence', readOnly: true, filter: true }),
+      f('sequenceStep', 'Sequence step', 'number', { section: 'Sequence', readOnly: true }),
+      f('sequenceNextDue', 'Next sequence step', 'datetime', { section: 'Sequence', readOnly: true }),
+      f('sequenceId', 'Sequence ID', 'text', { hidden: true }),
+      f('sequenceStarted', 'Sequence started', 'datetime', { hidden: true }),
       f('jobTitle', 'Job title', 'text', { section: 'General', grid: true }),
       ref('accountRef', 'Account', 'accounts', { section: 'General', grid: true, filter: true }),
       owner('ContactOwner'),
@@ -201,6 +216,8 @@ export const ENTITIES: IEntityDef[] = [
       f('preferredContact', 'Preferred contact method', 'choice', { choices: ['Email', 'Phone', 'Teams', 'Any'], section: 'Privacy' }),
       f('marketingConsent', 'Marketing consent (opt-in)', 'boolean', { section: 'Privacy', filter: true }),
       f('consentDate', 'Consent date', 'date', { section: 'Privacy' }),
+      f('unsubscribed', 'Unsubscribed from marketing', 'boolean', { section: 'Privacy', filter: true }),
+      f('unsubToken', 'Unsubscribe token', 'text', { hidden: true }),
       { ...tags, section: 'Privacy' },
       f('description', 'Notes', 'note', { section: 'Details' })
     ]
@@ -333,7 +350,29 @@ export const ENTITIES: IEntityDef[] = [
       f('requesterEmail', 'Requester email', 'email', { section: 'General' }),
       f('resolvedDate', 'Resolved on', 'datetime', { readOnly: true, section: 'Resolution' }),
       f('description', 'Description', 'note', { section: 'Details' }),
-      f('resolution', 'Resolution', 'note', { section: 'Resolution' })
+      f('resolution', 'Resolution', 'note', { section: 'Resolution' }),
+      ref('articleRef', 'Knowledge article', 'articles', { section: 'Resolution' }),
+      f('csatScore', 'Satisfaction (1-5)', 'number', { section: 'Resolution', readOnly: true, grid: false, filter: false }),
+      f('csatComment', 'Customer feedback', 'note', { section: 'Resolution', readOnly: true }),
+      f('csatSentAt', 'Survey sent', 'datetime', { section: 'Resolution', readOnly: true }),
+      f('csatToken', 'Survey token', 'text', { hidden: true })
+    ]
+  },
+  {
+    key: 'articles', listTitle: 'CRM Knowledge Base', singular: 'Article', plural: 'Knowledge base', icon: 'KnowledgeArticle', area: 'Service', plan: 'enterprise',
+    description: 'Answers to common questions, suggested on cases', activityName: 'Article', boardField: 'articleStatus',
+    searchFields: ['title', 'body', 'keywords'],
+    related: [{ entity: 'cases', field: 'articleRef', label: 'Cases' }],
+    fields: [
+      title('Question or title'),
+      f('articleStatus', 'Status', 'choice', { choices: ['Draft', 'Published', 'Archived'], defaultValue: 'Draft', section: 'General', grid: true, filter: true }),
+      f('category', 'Category', 'choice', { choicesFrom: 'caseCategories', section: 'General', grid: true, filter: true }),
+      ref('productRef', 'Product', 'products', { section: 'General', grid: true }),
+      f('keywords', 'Keywords', 'text', { section: 'General' }),
+      f('publicUrl', 'Public link (help centre)', 'url', { section: 'General' }),
+      owner('ArticleOwner'),
+      f('body', 'Answer', 'note', { section: 'Answer' }),
+      f('useCount', 'Used on cases', 'number', { section: 'General', readOnly: true, grid: true })
     ]
   },
   {
@@ -354,6 +393,8 @@ export const ENTITIES: IEntityDef[] = [
       f('actualCost', 'Actual cost', 'currency', { section: 'Budget' }),
       f('expectedRevenue', 'Expected revenue', 'currency', { section: 'Budget' }),
       owner('CampaignOwner'),
+      f('emailsSent', 'Emails sent', 'number', { section: 'Budget', readOnly: true, grid: true }),
+      f('lastEmailAt', 'Last email sent', 'datetime', { section: 'Budget', readOnly: true }),
       f('description', 'Description', 'note', { section: 'Details' })
     ]
   },

@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const VERSION = '1.4.0.0';
+const VERSION = '1.5.0.0';
 const SOLUTION = 'BrillientaCRMFlows';
 const PREFIX = 'bri';
 
@@ -31,6 +31,7 @@ const ENV = {
   waPhoneId: { schema: `${PREFIX}_WhatsAppPhoneNumberId`, name: 'WhatsApp phone number ID', def: 'not-set', desc: 'Meta › WhatsApp › API setup › Phone number ID of your WhatsApp Business number.' },
   waToken: { schema: `${PREFIX}_WhatsAppAccessToken`, name: 'WhatsApp access token', def: 'not-set', desc: 'Permanent System User access token with whatsapp_business_messaging. Treat as a password (consider an Azure Key Vault secret).' },
   waVerify: { schema: `${PREFIX}_WhatsAppVerifyToken`, name: 'WhatsApp webhook verify token', def: 'not-set', desc: 'Any long random text; enter the same value as the Verify token in Meta › WhatsApp › Configuration › Webhook.' },
+  apiKey: { schema: `${PREFIX}_InboundApiKey`, name: 'Inbound API key', def: 'not-set', desc: 'Long random secret that callers of the Inbound API flow send in the x-api-key header. The API is closed while this is not-set.' },
   mailbox: { schema: `${PREFIX}_SupportMailbox`, name: 'Support mailbox', def: 'support@contoso.com', desc: 'Shared mailbox watched by the Email to case flow (the flow connection needs Full Access or Send As on it).' },
   casePrefix: { schema: `${PREFIX}_CasePrefix`, name: 'Case number prefix', def: 'CS', desc: 'Same as Settings › Company › Case number prefix in the CRM. New email cases are numbered PREFIX-YEAR-ID.' },
   library: { schema: `${PREFIX}_CustomerFolderLibrary`, name: 'Customer folder library', def: 'Documents', desc: 'Document library (on the CRM site) where a folder is created for every won customer.' }
@@ -955,6 +956,180 @@ flow('Brillienta CRM - WhatsApp inbound',
           Accepted: respond(200, { Our_number: ['Succeeded', 'Failed', 'Skipped', 'TimedOut'] })
         }
       }
+    }
+  });
+
+
+// 17 — Case satisfaction survey (page served by the flow)
+const C = (k) => `body('Get_case')?['${k}']`;
+flow('Brillienta CRM - Case satisfaction survey',
+  'Serves the one-click 1–5 satisfaction survey that the CRM emails when a case is resolved. Saves the score on the case immediately, then lets the customer add a comment. Low scores (1–2) alert the support manager. Requires Power Automate Premium (HTTP trigger).',
+  ['sp', 'outlook'], ['site', 'page', 'support'],
+  { manual: { type: 'Request', kind: 'Http', inputs: { triggerAuthenticationType: 'All' } } },
+  {
+    Case_id: { runAfter: {}, type: 'Compose', inputs: "@int(coalesce(triggerOutputs()?['queries']?['q'], '0'))" },
+    Rating: { runAfter: {}, type: 'Compose', inputs: "@if(contains(createArray('1', '2', '3', '4', '5'), coalesce(triggerOutputs()?['queries']?['r'], '')), int(triggerOutputs()?['queries']?['r']), 0)" },
+    Get_case: api('sp', 'GetItem', { dataset: P('site'), table: LISTS.cases, id: "@outputs('Case_id')" }, { Case_id: ['Succeeded'] }),
+    Case_not_found: htmlResponse(page('Link not valid', '<h1>This link is not valid</h1>'), { Get_case: ['Failed', 'Skipped', 'TimedOut'] }),
+    Valid_link: {
+      runAfter: { Get_case: ['Succeeded'], Rating: ['Succeeded'] }, type: 'If',
+      expression: { and: [{ not: { equals: [`@coalesce(${C('CsatToken')}, '')`, ''] } }, { equals: ["@coalesce(triggerOutputs()?['queries']?['t'], '')", `@coalesce(${C('CsatToken')}, '')`] }] },
+      actions: {
+        Is_comment: {
+          runAfter: {}, type: 'If',
+          expression: { and: [{ contains: ["@toLower(string(coalesce(triggerOutputs()?['headers']?['Content-Type'], triggerOutputs()?['headers']?['content-type'], '')))", 'application/x-www-form-urlencoded'] }] },
+          actions: {
+            Form_comment: { runAfter: {}, ...formField('comment') },
+            Save_comment: api('sp', 'PatchItem', {
+              dataset: P('site'), table: LISTS.cases, id: "@outputs('Case_id')", 'item/Title': `@${C('Title')}`,
+              'item/CsatComment': "@{take(trim(string(coalesce(first(body('Form_comment'))?['value'], ''))), 2000)}"
+            }, { Form_comment: ['Succeeded'] }),
+            Thanks_comment: htmlResponse(page('Thank you', '<h1>Thank you for your feedback</h1><div class="done">We read every comment and use it to improve our support.</div>'), { Save_comment: ['Succeeded', 'Failed'] })
+          },
+          else: {
+            actions: {
+              Has_rating: {
+                runAfter: {}, type: 'If', expression: { and: [{ greater: ["@outputs('Rating')", 0] }] },
+                actions: {
+                  Save_rating: api('sp', 'PatchItem', { dataset: P('site'), table: LISTS.cases, id: "@outputs('Case_id')", 'item/Title': `@${C('Title')}`, 'item/CsatScore': "@outputs('Rating')" }),
+                  Low_score: {
+                    runAfter: { Save_rating: ['Succeeded'] }, type: 'If', expression: { and: [{ lessOrEquals: ["@outputs('Rating')", 2] }] },
+                    actions: {
+                      Alert_support: email(P('support'), `Low satisfaction (@{outputs('Rating')}/5) on @{${C('CaseNumber')}}`,
+                        html(`A customer rated case @{${C('CaseNumber')}} @{outputs('Rating')}/5`, `<table>${tr('Case', `@{${H(C('Title'))}}`)}${tr('Owner', `@{coalesce(${C('CaseOwner')}?['DisplayName'], 'Unassigned')}`)}</table><p>Consider following up with the customer.</p>`),
+                        {}, { 'emailMessage/Cc': `@{coalesce(${C('CaseOwner')}?['Email'], '')}`, 'emailMessage/Importance': 'High' })
+                    },
+                    else: { actions: {} }
+                  }
+                },
+                else: { actions: {} }
+              },
+              Comment_page: htmlResponse(page('Thank you', `<h1>Thank you!</h1><p class="m">@{if(greater(outputs('Rating'), 0), concat('You rated case ', ${H(C('CaseNumber'))}, ' ', string(outputs('Rating')), ' out of 5.'), '')}</p>
+<form method="post" action=""><label for="c">Anything we could do better? (optional)</label><textarea id="c" name="comment" rows="4" maxlength="2000"></textarea><div class="btns"><button class="ok" type="submit">Send feedback</button></div></form>`), { Has_rating: ['Succeeded', 'Failed'] })
+            }
+          }
+        }
+      },
+      else: { actions: { Link_invalid: htmlResponse(page('Link not valid', '<h1>This survey link is no longer valid</h1>')) } }
+    }
+  });
+
+
+// ------------------------------------------------------------------ SharePoint REST helper (generic list access)
+const spHttp = (method, uri, body, runAfter = {}, extraHeaders = {}) => api('sp', 'HttpRequest', {
+  dataset: P('site'), 'parameters/method': method, 'parameters/uri': uri,
+  'parameters/headers': { Accept: 'application/json;odata=nometadata', 'Content-Type': 'application/json;odata=nometadata', ...extraHeaders },
+  ...(body !== undefined ? { 'parameters/body': body } : {})
+}, runAfter);
+const jsonResponse = (status, body, runAfter = {}) => ({ runAfter, type: 'Response', kind: 'Http', inputs: { statusCode: status, headers: { 'Content-Type': 'application/json' }, body } });
+
+// 18 — Unsubscribe
+const UL = "@{if(startsWith(coalesce(triggerOutputs()?['queries']?['e'], ''), 'L'), 'AppSource Leads', 'CRM Contacts')}";
+flow('Brillienta CRM - Unsubscribe',
+  'Personal unsubscribe page for CRM marketing emails. Shows a confirmation button (so mail scanners cannot unsubscribe people by opening the link), then marks the lead or contact Unsubscribed, removes marketing consent and logs it on the timeline. Requires Power Automate Premium (HTTP trigger).',
+  ['sp'], ['site'],
+  { manual: { type: 'Request', kind: 'Http', inputs: { triggerAuthenticationType: 'All' } } },
+  {
+    Person_id: { runAfter: {}, type: 'Compose', inputs: "@int(substring(concat(coalesce(triggerOutputs()?['queries']?['e'], 'X0'), ''), 1))" },
+    List_name: { runAfter: {}, type: 'Compose', inputs: UL },
+    Get_person: spHttp('GET', "_api/web/lists/getbytitle('@{outputs('List_name')}')/items(@{outputs('Person_id')})?$select=Id,Title,UnsubToken", undefined, { Person_id: ['Succeeded'], List_name: ['Succeeded'] }),
+    Not_found: htmlResponse(page('Link not valid', '<h1>This link is not valid</h1>'), { Get_person: ['Failed', 'Skipped', 'TimedOut'] }),
+    Token_ok: {
+      runAfter: { Get_person: ['Succeeded'] }, type: 'If',
+      expression: { and: [{ not: { equals: ["@coalesce(body('Get_person')?['UnsubToken'], '')", ''] } }, { equals: ["@coalesce(triggerOutputs()?['queries']?['t'], '')", "@coalesce(body('Get_person')?['UnsubToken'], '')"] }] },
+      actions: {
+        Is_confirm: {
+          runAfter: {}, type: 'If', expression: { and: [{ contains: ["@toLower(string(coalesce(triggerOutputs()?['headers']?['Content-Type'], triggerOutputs()?['headers']?['content-type'], '')))", 'application/x-www-form-urlencoded'] }] },
+          actions: {
+            Unsubscribe: spHttp('POST', "_api/web/lists/getbytitle('@{outputs('List_name')}')/items(@{outputs('Person_id')})", { Unsubscribed: true, MarketingConsent: false }, {}, { 'X-HTTP-Method': 'MERGE', 'IF-MATCH': '*' }),
+            Log_unsubscribe: api('sp', 'PostItem', {
+              dataset: P('site'), table: LISTS.acts, 'item/Title': 'Consent: Unsubscribed from marketing (email link)', 'item/ActivityType/Value': 'Note',
+              'item/RelatedType': "@{if(startsWith(triggerOutputs()?['queries']?['e'], 'L'), 'Lead', 'Contact')}", 'item/RelatedId': "@outputs('Person_id')", 'item/Completed': true,
+              'item/Details': "Unsubscribed via the link in a marketing email on @{utcNow()}.", 'item/ActivitySource/Value': 'Flow'
+            }, { Unsubscribe: ['Succeeded'] }),
+            Done_page: htmlResponse(page('Unsubscribed', '<h1>You are unsubscribed</h1><div class="done">You will no longer receive marketing emails from us. Service messages about your account or support requests may still be sent.</div>'), { Unsubscribe: ['Succeeded'] })
+          },
+          else: { actions: { Confirm_page: htmlResponse(page('Unsubscribe', '<h1>Unsubscribe from marketing emails?</h1><form method="post" action=""><input type="hidden" name="confirm" value="yes"><div class="btns"><button class="ok" type="submit">Unsubscribe</button></div></form>')) } }
+        }
+      },
+      else: { actions: { Bad_token: htmlResponse(page('Link not valid', '<h1>This link is not valid</h1><p class="m">Please use the link in the most recent email.</p>')) } }
+    }
+  });
+
+// 19 — Inbound API
+const B = (k) => `triggerBody()?['${k}']`;
+const LIST_MAP = "{\"leads\":\"AppSource Leads\",\"contacts\":\"CRM Contacts\",\"accounts\":\"CRM Accounts\",\"opportunities\":\"CRM Opportunities\",\"cases\":\"CRM Cases\",\"activities\":\"CRM Activities\",\"demos\":\"CRM Demo Requests\",\"products\":\"CRM Products\",\"subscriptions\":\"CRM Subscriptions\",\"invoices\":\"CRM Invoices\"}";
+const MATCH_FIELDS = "createArray('Email', 'Title', 'Id', 'ExternalId', 'Whatsapp', 'CaseNumber', 'InvoiceNumber', 'QuoteNumber', 'Sku', 'Phone')";
+flow('Brillienta CRM - Inbound API',
+  'REST endpoint for other systems (ERP, billing, web apps, Zapier/Make). POST JSON {"entity": "leads", "action": "create" | "upsert" | "get", "match": {"field": "Email", "value": "x@y.com"}, "fields": {SharePoint column: value}} with the header x-api-key. Returns {"id": …, "action": …}. Requires Power Automate Premium (HTTP trigger).',
+  ['sp'], ['site', 'apiKey'],
+  {
+    manual: {
+      type: 'Request', kind: 'Http',
+      inputs: {
+        triggerAuthenticationType: 'All', method: 'POST',
+        schema: { type: 'object', properties: { entity: { type: 'string' }, action: { type: 'string' }, match: { type: 'object', properties: { field: { type: 'string' }, value: {} } }, fields: { type: 'object' } } }
+      }
+    }
+  },
+  {
+    Authorised: {
+      runAfter: {}, type: 'If',
+      expression: { and: [{ not: { equals: [P('apiKey'), 'not-set'] } }, { equals: ["@coalesce(triggerOutputs()?['headers']?['x-api-key'], triggerOutputs()?['headers']?['X-Api-Key'], '')", P('apiKey')] }] },
+      actions: {
+        List_title: { runAfter: {}, type: 'Compose', inputs: `@coalesce(json('${LIST_MAP}')?[toLower(coalesce(${B('entity')}, ''))], '')` },
+        Action: { runAfter: {}, type: 'Compose', inputs: `@{toLower(coalesce(${B('action')}, 'create'))}` },
+        Match_field: { runAfter: {}, type: 'Compose', inputs: `@{coalesce(${B('match')}?['field'], '')}` },
+        Valid_request: {
+          runAfter: { List_title: ['Succeeded'], Action: ['Succeeded'], Match_field: ['Succeeded'] }, type: 'If',
+          expression: { and: [
+            { not: { equals: ["@outputs('List_title')", ''] } },
+            { contains: ["@createArray('create', 'upsert', 'get')", "@outputs('Action')"] },
+            { or: [{ equals: ["@outputs('Action')", 'create'] }, { contains: [`@${MATCH_FIELDS}`, "@outputs('Match_field')"] }] }
+          ] },
+          actions: {
+            Needs_lookup: {
+              runAfter: {}, type: 'If', expression: { and: [{ not: { equals: ["@outputs('Action')", 'create'] } }] },
+              actions: {
+                Find: spHttp('GET', `_api/web/lists/getbytitle('@{outputs('List_title')}')/items?$top=1&$filter=@{outputs('Match_field')} eq @{if(equals(outputs('Match_field'), 'Id'), string(${B('match')}?['value']), concat('''', replace(string(${B('match')}?['value']), '''', ''''''), ''''))}`)
+              },
+              else: { actions: {} }
+            },
+            Found: { runAfter: { Needs_lookup: ['Succeeded'] }, type: 'Compose', inputs: "@first(coalesce(body('Find')?['value'], createArray()))" },
+            Route: {
+              runAfter: { Found: ['Succeeded'] }, type: 'If', expression: { and: [{ equals: ["@outputs('Action')", 'get'] }] },
+              actions: {
+                Get_result: {
+                  runAfter: {}, type: 'If', expression: { and: [{ not: { equals: ["@outputs('Found')", null] } }] },
+                  actions: { Return_item: jsonResponse(200, "@outputs('Found')") },
+                  else: { actions: { Return_404: jsonResponse(404, { error: 'not found' }) } }
+                }
+              },
+              else: {
+                actions: {
+                  Update_or_create: {
+                    runAfter: {}, type: 'If', expression: { and: [{ equals: ["@outputs('Action')", 'upsert'] }, { not: { equals: ["@outputs('Found')", null] } }] },
+                    actions: {
+                      Update_item: spHttp('POST', "_api/web/lists/getbytitle('@{outputs('List_title')}')/items(@{outputs('Found')?['Id']})", `@coalesce(${B('fields')}, json('{}'))`, {}, { 'X-HTTP-Method': 'MERGE', 'IF-MATCH': '*' }),
+                      Updated: jsonResponse(200, { id: "@outputs('Found')?['Id']", action: 'updated' }, { Update_item: ['Succeeded'] }),
+                      Update_failed: jsonResponse(400, { error: "@{coalesce(body('Update_item')?['odata.error']?['message']?['value'], 'update failed')}" }, { Update_item: ['Failed', 'TimedOut'] })
+                    },
+                    else: {
+                      actions: {
+                        Create_item: spHttp('POST', "_api/web/lists/getbytitle('@{outputs('List_title')}')/items", `@coalesce(${B('fields')}, json('{}'))`),
+                        Created: jsonResponse(201, { id: "@body('Create_item')?['Id']", action: 'created' }, { Create_item: ['Succeeded'] }),
+                        Create_failed: jsonResponse(400, { error: "@{coalesce(body('Create_item')?['odata.error']?['message']?['value'], 'create failed')}" }, { Create_item: ['Failed', 'TimedOut'] })
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          else: { actions: { Bad_request: jsonResponse(400, { error: 'entity must be one of leads, contacts, accounts, opportunities, cases, activities, demos, products, subscriptions, invoices; action create, upsert or get; match.field one of Email, Title, Id, ExternalId, Whatsapp, CaseNumber, InvoiceNumber, QuoteNumber, Sku, Phone' }) } }
+        }
+      },
+      else: { actions: { Unauthorised: jsonResponse(401, { error: 'missing or wrong x-api-key' }) } }
     }
   });
 

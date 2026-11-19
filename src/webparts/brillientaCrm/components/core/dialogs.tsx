@@ -10,6 +10,7 @@ import { DateTimeField, LookupPicker, UserPicker } from './controls';
 import { choicesFor } from './fields';
 import { errorText, parseCsv } from '../utils';
 import { logWhatsApp, waLink, waNumber, waRecipient } from '../../services/WhatsApp';
+import { audience, exportAudience, IAudienceFilter, MAX_PER_RUN, sendCampaign } from '../../services/Marketing';
 
 /* ---------------------------------------------------------------- convert lead */
 
@@ -83,8 +84,8 @@ export const ConvertLeadDialog: React.FC<{ lead: IRecord; onClose: (done?: boole
 
 /* ---------------------------------------------------------------- email (Outlook via Graph) */
 
-export const EmailDialog: React.FC<{ entity: EntityKey; record: IRecord; to?: string; subject?: string; body?: string; onClose: () => void }> =
-  ({ entity, record, to: initialTo, subject: s0, body: b0, onClose }) => {
+export const EmailDialog: React.FC<{ entity: EntityKey; record: IRecord; to?: string; subject?: string; body?: string; onClose: () => void; onSent?: () => void }> =
+  ({ entity, record, to: initialTo, subject: s0, body: b0, onClose, onSent }) => {
     const { engine, notify } = useCrm();
     const templates = engine.settings.emailTemplates;
     const [to, setTo] = React.useState(initialTo || record.email || '');
@@ -103,7 +104,7 @@ export const EmailDialog: React.FC<{ entity: EntityKey; record: IRecord; to?: st
       setBusy(true);
       setError(undefined);
       engine.sendEmail(to, subject, body, record.id ? { key: entity, id: record.id } : undefined, cc.split(/[;,]/).map(x => x.trim()).filter(Boolean))
-        .then(() => { notify('Email sent from your Outlook mailbox and logged.', MessageBarType.success); onClose(); })
+        .then(() => { notify('Email sent from your Outlook mailbox and logged.', MessageBarType.success); onSent?.(); onClose(); })
         .catch(e => { setBusy(false); setError(errorText(e)); });
     };
     const mailtoHref = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
@@ -125,6 +126,7 @@ export const EmailDialog: React.FC<{ entity: EntityKey; record: IRecord; to?: st
           {graphOn && <PrimaryButton text={busy ? 'Sending...' : 'Send'} iconProps={{ iconName: 'Send' }} disabled={busy || !to || !subject} onClick={send} />}
           <DefaultButton text="Open in mail app" href={mailtoHref} target="_blank" onClick={() => {
             if (record.id) { engine.logActivity(entity, record.id, `Email: ${subject}`, `To: ${to}\n\n${body}`, 'Email').catch(() => undefined); }
+            onSent?.();
             onClose();
           }} />
           <DefaultButton text="Cancel" onClick={onClose} />
@@ -324,13 +326,14 @@ export const ImportDialog: React.FC<{ entity: EntityKey; onClose: () => void }> 
 
 /* ---------------------------------------------------------------- WhatsApp */
 
-export const WhatsAppDialog: React.FC<{ entity: EntityKey; record: IRecord; onClose: () => void }> = ({ entity, record, onClose }) => {
+export const WhatsAppDialog: React.FC<{ entity: EntityKey; record: IRecord; onClose: () => void; onSent?: () => void; templateId?: string }> = ({ entity, record, onClose, onSent, templateId }) => {
   const { engine, notify } = useCrm();
   const wa = engine.settings.whatsapp;
   const rcpt = waRecipient(engine, entity, record);
   const [to, setTo] = React.useState(rcpt.number ? `+${rcpt.number}` : '');
-  const [tplId, setTplId] = React.useState<string>('');
-  const [text, setText] = React.useState('');
+  const initialTpl = wa.templates.find(t => t.id === templateId);
+  const [tplId, setTplId] = React.useState<string>(initialTpl ? initialTpl.id : '');
+  const [text, setText] = React.useState(initialTpl ? engine.fillTemplate(initialTpl.body, record) : '');
   const [useTemplate, setUseTemplate] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string>();
@@ -346,11 +349,11 @@ export const WhatsAppDialog: React.FC<{ entity: EntityKey; record: IRecord; onCl
   const openChat = (): void => {
     // Open synchronously (pop-up blockers), then log.
     window.open(waLink(number, text), '_blank', 'noopener');
-    log(false).then(() => { notify('WhatsApp opened and logged on the timeline.'); onClose(); }).catch(e => setError(errorText(e)));
+    log(false).then(() => { notify('WhatsApp opened and logged on the timeline.'); onSent?.(); onClose(); }).catch(e => setError(errorText(e)));
   };
   const send = (): void => {
     setBusy(true);
-    log(true).then(() => { setBusy(false); notify('WhatsApp message queued. Power Automate sends it within a minute.'); onClose(); })
+    log(true).then(() => { setBusy(false); notify('WhatsApp message queued. Power Automate sends it within a minute.'); onSent?.(); onClose(); })
       .catch(e => { setBusy(false); setError(errorText(e)); });
   };
   return (
@@ -372,6 +375,169 @@ export const WhatsAppDialog: React.FC<{ entity: EntityKey; record: IRecord; onCl
         {cloud ? <DefaultButton iconProps={{ iconName: 'Chat' }} text="Open in WhatsApp" disabled={!number} onClick={openChat} />
           : <PrimaryButton iconProps={{ iconName: 'Chat' }} text="Open WhatsApp" disabled={!number} onClick={openChat} />}
         <DefaultButton text="Cancel" onClick={onClose} />
+      </DialogFooter>
+    </Dialog>
+  );
+};
+
+/* ---------------------------------------------------------------- merge duplicates */
+
+export const MergeDialog: React.FC<{ entity: EntityKey; master: IRecord; duplicate: IRecord; onClose: (merged?: IRecord) => void }> = ({ entity, master, duplicate, onClose }) => {
+  const { engine, notify } = useCrm();
+  const def = engine.def(entity);
+  const show = (v: unknown, fd: { type: string; lookup?: string }): string => {
+    if (v === undefined || v === null || v === '') { return '—'; }
+    if (typeof v === 'object' && 'title' in (v as any)) { return (v as any).title; }
+    if (fd.type === 'lookup') { return engine.display(fd.lookup as EntityKey, v as number) || String(v); }
+    if (Array.isArray(v)) { return v.join(', '); }
+    if (typeof v === 'boolean') { return v ? 'Yes' : 'No'; }
+    if (fd.type.indexOf('date') === 0) { return new Date(String(v)).toLocaleDateString(); }
+    return String(v);
+  };
+  const diffs = def.fields.filter(fd => !fd.readOnly && !fd.hidden && fd.type !== 'json' && show(master[fd.key], fd) !== show(duplicate[fd.key], fd));
+  const [take, setTake] = React.useState<Record<string, boolean>>({});
+  const [busy, setBusy] = React.useState<string>();
+  const [error, setError] = React.useState<string>();
+  const merge = (): void => {
+    setBusy('Merging…');
+    engine.mergeRecords(entity, master, duplicate, Object.keys(take).filter(k => take[k]), m => setBusy(`Moving linked ${m}`))
+      .then(r => { notify(`Merged into ${r.title || 'the record'}.`, MessageBarType.success); onClose(r); })
+      .catch(e => { setBusy(undefined); setError(errorText(e)); });
+  };
+  return (
+    <Dialog hidden={false} onDismiss={() => onClose()} minWidth={640} maxWidth={820}
+      dialogContentProps={{ type: DialogType.normal, title: `Merge duplicate ${def.singular.toLowerCase()}`, subText: `“${duplicate.title}” is merged into “${master.title}” and then deleted. Its activities, deals, quotes, cases and other links move to “${master.title}”.` }}>
+      {error && <MessageBar messageBarType={MessageBarType.error}>{error}</MessageBar>}
+      {diffs.length ? (
+        <div className="crm-merge-grid" role="table">
+          <Text className="crm-muted" role="columnheader">Field</Text><Text className="crm-muted" role="columnheader">Keep (this record)</Text><Text className="crm-muted" role="columnheader">Duplicate</Text>
+          {diffs.map(fd => (
+            <React.Fragment key={fd.key}>
+              <Text role="rowheader" styles={{ root: { fontWeight: 600 } }}>{fd.label}</Text>
+              <ChoiceGroup selectedKey={take[fd.key] ? 'dup' : 'master'} options={[{ key: 'master', text: show(master[fd.key], fd) }]} onChange={() => setTake({ ...take, [fd.key]: false })} aria-label={`${fd.label}: keep`} />
+              <ChoiceGroup selectedKey={take[fd.key] ? 'dup' : 'master'} options={[{ key: 'dup', text: show(duplicate[fd.key], fd) }]} onChange={() => setTake({ ...take, [fd.key]: true })} aria-label={`${fd.label}: duplicate`} />
+            </React.Fragment>
+          ))}
+        </div>
+      ) : <Text>The two records have the same values.</Text>}
+      <Text variant="small" className="crm-muted" block style={{ marginTop: 8 }}>Empty fields on this record are filled from the duplicate automatically.</Text>
+      {busy && <ProgressIndicator label={busy} />}
+      <DialogFooter>
+        <PrimaryButton iconProps={{ iconName: 'Merge' }} text="Merge" disabled={!!busy} onClick={merge} />
+        <DefaultButton text="Cancel" disabled={!!busy} onClick={() => onClose()} />
+      </DialogFooter>
+    </Dialog>
+  );
+};
+
+/* ---------------------------------------------------------------- call (Teams / phone) with logging */
+
+export const CallDialog: React.FC<{ entity: EntityKey; record: IRecord; onClose: () => void }> = ({ entity, record, onClose }) => {
+  const { engine, notify } = useCrm();
+  const cc = engine.settings.whatsapp.defaultCountryCode;
+  const contact = record.contactRef ? engine.find('contacts', record.contactRef) : undefined;
+  const raw = record.mobile || record.phone || contact?.mobile || contact?.phone || '';
+  const [number, setNumber] = React.useState(raw ? `+${waNumber(raw, cc) || String(raw).replace(/[^\d+]/g, '')}` : '');
+  const [started, setStarted] = React.useState<number>();
+  const [now, setNow] = React.useState(Date.now());
+  const [outcome, setOutcome] = React.useState('Connected');
+  const [notes, setNotes] = React.useState('');
+  const [followUp, setFollowUp] = React.useState<string>();
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string>();
+  React.useEffect(() => { if (!started) { return undefined; } const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, [started]);
+  const e164 = waNumber(number, cc);
+  const secs = started ? Math.max(0, Math.round((now - started) / 1000)) : 0;
+  const mmss = `${Math.floor(secs / 60)}:${('0' + (secs % 60)).slice(-2)}`;
+  const start = (): void => { if (!started) { setStarted(Date.now()); setNow(Date.now()); } };
+  const save = (): void => {
+    setBusy(true);
+    const minutes = Math.max(started ? 1 : 0, Math.round(secs / 60));
+    (async () => {
+      await engine.logActivity(entity, record.id!, `Call: ${outcome}${record.title ? ` – ${record.title}` : ''}`, `${e164 ? `+${e164}` : number}${started ? ` · ${mmss} min` : ''}\n${notes}`.trim(), 'Call');
+      if (followUp) {
+        await engine.save('activities', { title: `Follow up: ${record.title || ''}`.slice(0, 255), activityType: 'Task', completed: false, dueDate: followUp, relatedType: engine.def(entity).activityName, relatedId: record.id, owner: engine.me, details: notes });
+      }
+      if (entity === 'leads' && record.status === 'New' && outcome !== 'Wrong number') { await engine.patch('leads', record.id!, { status: 'Contacted' }); }
+      return minutes;
+    })().then(() => { notify('Call logged.', MessageBarType.success); onClose(); }).catch(e => { setBusy(false); setError(errorText(e)); });
+  };
+  return (
+    <Dialog hidden={false} onDismiss={onClose} minWidth={460} maxWidth={560} dialogContentProps={{ type: DialogType.normal, title: `Call ${record.title || ''}` }}>
+      <Stack tokens={{ childrenGap: 8 }}>
+        {error && <MessageBar messageBarType={MessageBarType.error}>{error}</MessageBar>}
+        <TextField label="Number" value={number} onChange={(_, v) => setNumber(v || '')} />
+        <Stack horizontal wrap tokens={{ childrenGap: 8 }} verticalAlign="center">
+          <PrimaryButton iconProps={{ iconName: 'TeamsLogo' }} text="Call with Teams" disabled={!e164} href={`https://teams.microsoft.com/l/call/0/0?users=4:+${e164}`} target="_blank" onClick={start} />
+          <DefaultButton iconProps={{ iconName: 'Phone' }} text="Call with phone" disabled={!e164} href={`tel:+${e164}`} onClick={start} />
+          {started ? <Text styles={{ root: { fontVariantNumeric: 'tabular-nums' } }} aria-live="polite">⏱ {mmss}</Text> : <Link onClick={start}>Start timer</Link>}
+        </Stack>
+        <ChoiceGroup label="Outcome" selectedKey={outcome} onChange={(_, o) => setOutcome(String(o?.key))}
+          options={['Connected', 'Left voicemail', 'No answer', 'Busy', 'Wrong number'].map(x => ({ key: x, text: x }))} styles={{ flexContainer: { display: 'flex', flexWrap: 'wrap', gap: '0 14px' } }} />
+        <TextField label="Notes" multiline rows={3} value={notes} onChange={(_, v) => setNotes(v || '')} />
+        <DateTimeField label="Follow-up task (optional)" value={followUp} onChange={v => setFollowUp(v)} />
+        <Text variant="small" className="crm-muted">Teams calls to phone numbers need Teams Phone. Calls are logged on the timeline when you click Log call.</Text>
+      </Stack>
+      <DialogFooter>
+        <PrimaryButton text={busy ? 'Saving…' : 'Log call'} disabled={busy} onClick={save} />
+        <DefaultButton text="Cancel" onClick={onClose} />
+      </DialogFooter>
+    </Dialog>
+  );
+};
+
+/* ---------------------------------------------------------------- email campaign */
+
+export const CampaignEmailDialog: React.FC<{ campaign: IRecord; onClose: () => void }> = ({ campaign, onClose }) => {
+  const { engine, notify, settings } = useCrm();
+  React.useEffect(() => { engine.ensure(['leads', 'contacts']).catch(() => undefined); }, []);
+  const [f, setF] = React.useState<IAudienceFilter>({ leads: true, contacts: true, tag: '', leadSource: '', country: '', campaignLeadsOnly: false });
+  const [subject, setSubject] = React.useState(campaign.title || '');
+  const [body, setBody] = React.useState('Hi {{firstName}},\n\n\n\nBest regards,\n{{senderName}}\n{{companyName}}');
+  const [progress, setProgress] = React.useState<{ sent: number; failed: number }>();
+  const [error, setError] = React.useState<string>();
+  const stop = React.useRef(false);
+  const aud = audience(engine, f, campaign.id);
+  const n = Math.min(aud.ok.length, MAX_PER_RUN);
+  const minutes = Math.ceil((n * Math.max(1, settings.marketing.secondsBetweenEmails)) / 60);
+  const send = (): void => {
+    if (!window.confirm(`Send “${subject}” to ${n} recipient(s) from your mailbox? This takes about ${minutes} minute(s); keep this window open.`)) { return; }
+    stop.current = false;
+    setProgress({ sent: 0, failed: 0 });
+    sendCampaign(engine, campaign, aud.ok, subject, body, (sent, failed) => setProgress({ sent, failed }), () => stop.current)
+      .then(r => { notify(`Campaign email sent to ${r.sent} recipient(s)${r.failed.length ? `, ${r.failed.length} failed` : ''}.`, r.failed.length ? MessageBarType.warning : MessageBarType.success); onClose(); })
+      .catch(e => { setProgress(undefined); setError(errorText(e)); });
+  };
+  const busy = !!progress;
+  return (
+    <Dialog hidden={false} onDismiss={busy ? undefined : onClose} minWidth={620} maxWidth={760} modalProps={{ isBlocking: busy }}
+      dialogContentProps={{ type: DialogType.normal, title: `Email campaign: ${campaign.title}` }}>
+      <Stack tokens={{ childrenGap: 8 }}>
+        {error && <MessageBar messageBarType={MessageBarType.error} isMultiline>{error}</MessageBar>}
+        <Stack horizontal wrap tokens={{ childrenGap: 16 }}>
+          <Checkbox label="Contacts" checked={f.contacts} disabled={busy} onChange={(_, c) => setF({ ...f, contacts: !!c })} />
+          <Checkbox label="Open leads" checked={f.leads} disabled={busy} onChange={(_, c) => setF({ ...f, leads: !!c })} />
+          <Checkbox label="Only leads of this campaign" checked={f.campaignLeadsOnly} disabled={busy || !f.leads} onChange={(_, c) => setF({ ...f, campaignLeadsOnly: !!c })} />
+        </Stack>
+        <Stack horizontal wrap tokens={{ childrenGap: 8 }}>
+          <TextField label="Tag" value={f.tag} disabled={busy} onChange={(_, v) => setF({ ...f, tag: v || '' })} styles={{ root: { width: 160 } }} />
+          <Dropdown label="Lead source" selectedKey={f.leadSource} disabled={busy || !f.leads} options={[{ key: '', text: 'Any' }, ...settings.leadSources.map(x => ({ key: x, text: x }))]}
+            onChange={(_, o) => setF({ ...f, leadSource: String(o?.key || '') })} styles={{ root: { width: 180 } }} />
+          <TextField label="Country" value={f.country} disabled={busy} onChange={(_, v) => setF({ ...f, country: v || '' })} styles={{ root: { width: 140 } }} />
+        </Stack>
+        <MessageBar messageBarType={aud.ok.length ? MessageBarType.info : MessageBarType.warning} isMultiline>
+          <b>{aud.ok.length}</b> recipient(s) with marketing consent. Excluded: {aud.excluded.noConsent} without opt-in, {aud.excluded.unsubscribed} unsubscribed, {aud.excluded.noEmail} without email.
+          {aud.ok.length > MAX_PER_RUN && <> Only the first {MAX_PER_RUN} are sent per run (Outlook limits); export the audience for larger sends.</>}
+        </MessageBar>
+        <TextField label="Subject" value={subject} disabled={busy} onChange={(_, v) => setSubject(v || '')} required />
+        <TextField label="Message" multiline rows={8} value={body} disabled={busy} onChange={(_, v) => setBody(v || '')} />
+        <Text variant="small" className="crm-muted">Placeholders such as {'{{firstName}}'} are filled per person. Your company footer and a personal unsubscribe link are added automatically.</Text>
+        {progress && <ProgressIndicator label={`Sending… ${progress.sent} of ${n}${progress.failed ? ` (${progress.failed} failed)` : ''}`} percentComplete={n ? (progress.sent + progress.failed) / n : 0} />}
+      </Stack>
+      <DialogFooter>
+        {!busy && <PrimaryButton iconProps={{ iconName: 'Send' }} text={`Send to ${n}`} disabled={!n || !subject.trim() || !body.trim()} onClick={send} />}
+        {!busy && <DefaultButton iconProps={{ iconName: 'Download' }} text="Export for Mailchimp / Brevo" disabled={!aud.ok.length} onClick={() => exportAudience(aud.ok, campaign)} />}
+        {busy ? <DefaultButton text="Stop" onClick={() => { stop.current = true; }} /> : <DefaultButton text="Cancel" onClick={onClose} />}
       </DialogFooter>
     </Dialog>
   );

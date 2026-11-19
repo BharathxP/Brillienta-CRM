@@ -419,6 +419,13 @@ export class DataService {
     }).catch(() => undefined);
   }
 
+  /** Permanently deletes the audit entries of a record (right to erasure). */
+  public async purgeAudit(entity: string, recordId: number): Promise<number> {
+    const rows = await this.getAudit(entity, recordId, 5000);
+    for (const r of rows) { await this.rest.delete(`${this.items('audit')}(${r.id})`); }
+    return rows.length;
+  }
+
   public async getAudit(entity?: string, recordId?: number, top: number = 500): Promise<IRecord[]> {
     const filters: string[] = [];
     if (entity) { filters.push(`EntityType eq '${entity}'`); }

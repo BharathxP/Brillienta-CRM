@@ -4,6 +4,7 @@ import { ACTIVITY_TYPES, EntityKey, IRecord, entityByActivityName } from '../../
 import { useCrm, useEntities } from '../CrmContext';
 import { DateTimeField, Pill, UserPicker } from './controls';
 import { errorText, fmtDate, isOverdue } from '../utils';
+import { EmailDialog, WhatsAppDialog } from './dialogs';
 
 const ICONS: Record<string, string> = { Call: 'Phone', Email: 'Mail', Meeting: 'Group', WhatsApp: 'Chat', Note: 'QuickNote', Task: 'TaskSolid' };
 
@@ -16,6 +17,13 @@ export const ActivityRow: React.FC<{ a: IRecord; showRelated?: boolean }> = ({ a
     engine.patch('activities', a.id!, { completed: c }).catch(e => notify(errorText(e), MessageBarType.error));
   };
   const relDef = showRelated && a.relatedType ? entityByActivityName(a.relatedType, engine.defs) : undefined;
+  // Sequence tasks carry "seq:<sequence>:<step>:<type>:<template>" so the step can be done in one click.
+  const seq = /\nseq:([^:\n]*):(\d+):(\w+):([^\n]*)$/.exec(a.details || '');
+  const details = seq ? (a.details || '').slice(0, seq.index) : a.details;
+  const [doStep, setDoStep] = React.useState(false);
+  const target = a.relatedType ? entityByActivityName(a.relatedType, engine.defs) : undefined;
+  const targetRec = target && a.relatedId ? engine.find(target.key, a.relatedId) : undefined;
+  const tpl = seq && seq[3] === 'Email' ? engine.settings.emailTemplates.find(t => t.id === seq[4]) : undefined;
   return (
     <div className="crm-timeline-item">
       <ActivityIcon type={a.activityType} />
@@ -24,7 +32,17 @@ export const ActivityRow: React.FC<{ a: IRecord; showRelated?: boolean }> = ({ a
           <Link onClick={() => open('activities', a)} styles={{ root: { fontWeight: 600, textDecoration: a.activityType === 'Task' && a.completed ? 'line-through' : undefined } }}>{a.title}</Link>
           {a.activityType === 'Task' && <Checkbox label="Done" checked={!!a.completed} disabled={!canEdit} onChange={(_, c) => toggle(!!c)} />}
         </Stack>
-        {a.details && <Text variant="small" block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{a.details.length > 600 ? `${a.details.slice(0, 600)}…` : a.details}</Text>}
+        {details && <Text variant="small" block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{details.length > 600 ? `${details.slice(0, 600)}…` : details}</Text>}
+        {seq && !a.completed && targetRec && (seq[3] === 'Email' || seq[3] === 'WhatsApp') && canEdit && (
+          <Link onClick={() => setDoStep(true)} styles={{ root: { fontSize: 13, fontWeight: 600 } }}>{seq[3] === 'Email' ? 'Send email now' : 'Send WhatsApp now'}</Link>
+        )}
+        {doStep && targetRec && target && seq && seq[3] === 'Email' && (
+          <EmailDialog entity={target.key} record={targetRec} subject={tpl ? engine.fillTemplate(tpl.subject, targetRec) : ''} body={tpl ? engine.fillTemplate(tpl.body, targetRec) : ''}
+            onSent={() => toggle(true)} onClose={() => setDoStep(false)} />
+        )}
+        {doStep && targetRec && target && seq && seq[3] === 'WhatsApp' && (
+          <WhatsAppDialog entity={target.key} record={targetRec} templateId={seq[4]} onSent={() => toggle(true)} onClose={() => setDoStep(false)} />
+        )}
         {/^https:\/\//i.test(a.webLink || '') && <Link href={a.webLink} target="_blank" rel="noopener noreferrer" styles={{ root: { fontSize: 12 } }}>Open in Outlook</Link>}
         <Text variant="small" block className="crm-muted">
           {relDef && a.relatedId ? <><Link onClick={() => { const r = engine.find(relDef.key, a.relatedId); if (r) { open(relDef.key, r); } }}>{relDef.singular}: {engine.display(relDef.key, a.relatedId)}</Link> · </> : null}

@@ -212,6 +212,9 @@ const BrillientaCrm: React.FC<IBrillientaCrmProps> = props => {
   React.useEffect(() => {
     if (phase !== 'ready' || props.mode === 'demoForm') { return undefined; }
     const t = setTimeout(() => {
+      engine.runSequences().then(r => {
+        if (r.sent || r.tasks || r.replied) { notify(`Sequences: ${[r.sent && `${r.sent} email(s) sent`, r.tasks && `${r.tasks} task(s) created`, r.replied && `${r.replied} stopped after a reply`].filter(Boolean).join(', ')}.`, MessageBarType.info); }
+      }).catch(e => console.warn('Sequences', errorText(e)));
       engine.processSignedQuotes().then(n => { if (n) { notify(`${n} quote(s) answered by e-signature.`, MessageBarType.success); } }).catch(e => console.warn('Signed quotes', errorText(e)));
       engine.normalizeCases().catch(e => console.warn('Case SLA update failed', errorText(e)));
       engine.runMaintenance().then(r => {

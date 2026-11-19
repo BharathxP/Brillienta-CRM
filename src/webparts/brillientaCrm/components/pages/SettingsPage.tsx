@@ -58,7 +58,7 @@ const FlowPackDialog: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     return undefined;
   };
   // Payment API keys are never typed into the browser: they are entered in Power Automate after import.
-  const isSecret = (schema: string): boolean => /razorpay|stripe|whatsapp/i.test(schema);
+  const isSecret = (schema: string): boolean => /razorpay|stripe|whatsapp|apikey/i.test(schema);
   const shown = (pack?.env || []).filter(e => !isSecret(e.schema));
   const anyInvalid = !pack || shown.some(e => !!invalid(e.schema, values[e.schema] || ''));
   const download = (): void => {
@@ -282,6 +282,10 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
                   onChange={(_, v) => upd({ quote: { ...s.quote, signingUrl: (v || '').trim() } })} />
                 <Toggle label="Signed quote closes the opportunity as won" inlineLabel checked={s.quote.signatureClosesOpportunity}
                   onChange={(_, v) => upd({ quote: { ...s.quote, signatureClosesOpportunity: !!v } })} />
+                <TextField label="Satisfaction survey link (HTTP URL of the flow “Case satisfaction survey”)" value={s.service.surveyUrl} placeholder="https://…"
+                  errorMessage={s.service.surveyUrl && !/^https:\/\//i.test(s.service.surveyUrl) ? 'Must start with https://' : undefined}
+                  onChange={(_, v) => upd({ service: { ...s.service, surveyUrl: (v || '').trim() } })} />
+                <Toggle label="Email a 1–5 survey when a case is resolved" inlineLabel checked={s.service.surveyOnResolve} onChange={(_, v) => upd({ service: { ...s.service, surveyOnResolve: !!v } })} />
                 <TextField label="Case number prefix" value={s.casePrefix} onChange={(_, v) => upd({ casePrefix: v || 'CS' })} />
               </Stack>
             </Card>
@@ -375,6 +379,42 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
               <UserPicker showMe={false} onChange={u => { if (u && !s.assignment.roundRobin.some(x => x.id === u.id)) { upd({ assignment: { ...s.assignment, roundRobin: [...s.assignment.roundRobin, u] } }); } }} />
               <Text variant="small" className="crm-muted" block>Leads created in the CRM are assigned on save. Marketplace leads arriving via Power Automate can be distributed with “Round-robin assign” in the Leads grid.</Text>
             </Card>
+            <Card title="Sales sequences" wide>
+              <Text variant="small" className="crm-muted" block>
+                Timed steps for leads and contacts (Leads/Contacts › select › Enrol in sequence). Due steps run when the owner opens the CRM: email steps are sent from the owner&apos;s mailbox when
+                “Send emails automatically” is on, otherwise every step becomes a task with a one-click Send. A reply by email (Outlook sync) or WhatsApp stops the sequence.
+              </Text>
+              {s.sequences.map((q, qi) => {
+                const setQ = (patch: Partial<typeof q>): void => upd({ sequences: s.sequences.map((x, j) => (j === qi ? { ...x, ...patch } : x)) });
+                return (
+                  <div key={q.id} className="crm-wa-tpl" style={{ marginTop: 10 }}>
+                    <Stack horizontal wrap verticalAlign="end" tokens={{ childrenGap: 12 }}>
+                      <TextField label="Sequence" value={q.name} onChange={(_, v) => setQ({ name: v || '' })} styles={{ root: { width: 260 } }} />
+                      <Toggle label="Send emails automatically" inlineLabel checked={q.autoSend} onChange={(_, c) => setQ({ autoSend: !!c })} />
+                      <IconButton iconProps={{ iconName: 'Delete' }} ariaLabel="Remove sequence" onClick={() => upd({ sequences: s.sequences.filter((_, j) => j !== qi) })} />
+                    </Stack>
+                    {q.steps.map((st, si) => {
+                      const setS = (patch: Partial<typeof st>): void => setQ({ steps: q.steps.map((x, j) => (j === si ? { ...x, ...patch } : x)) });
+                      const tplOptions = st.type === 'Email' ? s.emailTemplates.map(t => ({ key: t.id, text: t.name })) : st.type === 'WhatsApp' ? s.whatsapp.templates.map(t => ({ key: t.id, text: t.name })) : [];
+                      return (
+                        <Stack key={si} horizontal wrap verticalAlign="end" tokens={{ childrenGap: 8 }} style={{ marginTop: 4 }}>
+                          <TextField label={si ? undefined : 'Day'} ariaLabel="Day" type="number" value={String(st.day)} onChange={(_, v) => setS({ day: Math.max(0, Number(v) || 0) })} styles={{ root: { width: 70 } }} />
+                          <Dropdown label={si ? undefined : 'Step'} ariaLabel="Step type" selectedKey={st.type} options={['Email', 'Call', 'WhatsApp', 'Task'].map(x => ({ key: x, text: x }))}
+                            onChange={(_, o) => setS({ type: o?.key as typeof st.type, templateId: undefined })} styles={{ root: { width: 120 } }} />
+                          <TextField label={si ? undefined : 'Title'} ariaLabel="Step title" value={st.title} onChange={(_, v) => setS({ title: v || '' })} styles={{ root: { width: 240 } }} />
+                          {tplOptions.length > 0 && <Dropdown label={si ? undefined : 'Template'} ariaLabel="Template" selectedKey={st.templateId || null} options={tplOptions} onChange={(_, o) => setS({ templateId: String(o?.key) })} styles={{ root: { width: 180 } }} />}
+                          <IconButton iconProps={{ iconName: 'Cancel' }} ariaLabel="Remove step" onClick={() => setQ({ steps: q.steps.filter((_, j) => j !== si) })} />
+                        </Stack>
+                      );
+                    })}
+                    <DefaultButton iconProps={{ iconName: 'Add' }} text="Add step" styles={{ root: { marginTop: 8 } }}
+                      onClick={() => setQ({ steps: [...q.steps, { day: (q.steps[q.steps.length - 1]?.day || 0) + 3, type: 'Task', title: 'Follow up' }] })} />
+                  </div>
+                );
+              })}
+              <DefaultButton iconProps={{ iconName: 'Add' }} text="New sequence" styles={{ root: { marginTop: 10 } }}
+                onClick={() => upd({ sequences: [...s.sequences, { id: `seq${Date.now()}`, name: 'New sequence', autoSend: false, steps: [{ day: 0, type: 'Email', templateId: s.emailTemplates[0]?.id, title: 'First email' }] }] })} />
+            </Card>
             <Card title="Lead scoring (0–100)">
               <Stack tokens={{ childrenGap: 8 }}>
                 <TextField label="Rating points" multiline rows={3} value={kv(s.scoring.rating)} onChange={(_, v) => upd({ scoring: { ...s.scoring, rating: parseKv(v || '') } })} />
@@ -454,6 +494,28 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
                 onClick={() => engine.webhooks.test(s.integrations.teamsWebhookUrl).then(() => notify('Test sent.', MessageBarType.success)).catch(e => notify(errorText(e), MessageBarType.error))} />
             </Card>
             <CopilotAgentCard />
+            <Card title="Email marketing">
+              <Stack tokens={{ childrenGap: 8 }}>
+                <Text variant="small" className="crm-muted">Campaigns › Send email: sends one by one from your mailbox to leads and contacts with marketing consent, with a personal unsubscribe link.</Text>
+                <TextField label="Unsubscribe link (HTTP URL of the flow “Unsubscribe”)" value={s.marketing.unsubscribeUrl} placeholder="https://…"
+                  errorMessage={s.marketing.unsubscribeUrl && !/^https:\/\//i.test(s.marketing.unsubscribeUrl) ? 'Must start with https://' : undefined}
+                  onChange={(_, v) => upd({ marketing: { ...s.marketing, unsubscribeUrl: (v || '').trim() } })} />
+                <TextField label="Footer (company name and postal address, required by anti-spam laws)" multiline rows={2} value={s.marketing.footer}
+                  onChange={(_, v) => upd({ marketing: { ...s.marketing, footer: v || '' } })} />
+                <Toggle label="Leads need explicit opt-in too" inlineLabel checked={s.marketing.requireLeadOptIn} onChange={(_, c) => upd({ marketing: { ...s.marketing, requireLeadOptIn: !!c } })} />
+                <TextField label="Seconds between emails" type="number" value={String(s.marketing.secondsBetweenEmails)} description="Outlook allows about 30 emails a minute per mailbox."
+                  onChange={(_, v) => upd({ marketing: { ...s.marketing, secondsBetweenEmails: Math.max(1, Number(v) || 2) } })} styles={{ root: { width: 200 } }} />
+              </Stack>
+            </Card>
+            <Card title="Power BI">
+              <Text variant="small" block>
+                Power BI Desktop › <b>Get data › SharePoint Online list</b> › site <code>{engine.ds.rest.webUrl}</code> › implementation <b>2.0</b> › select the CRM lists.
+                Relate <code>AccountRef</code>, <code>ContactRef</code>, <code>OpportunityRef</code>, <code>QuoteRef</code> and <code>SubscriptionRef</code> to the <code>ID</code> of the matching list;
+                activities link by <code>RelatedType</code> + <code>RelatedId</code>. Publish to the Power BI service and set a scheduled refresh. Data stays protected by SharePoint permissions.
+              </Text>
+              <DefaultButton iconProps={{ iconName: 'Copy' }} text="Copy site URL" styles={{ root: { marginTop: 8 } }}
+                onClick={() => { (navigator.clipboard ? navigator.clipboard.writeText(engine.ds.rest.webUrl) : Promise.reject(new Error('no clipboard'))).then(() => notify('Site URL copied.')).catch(() => window.prompt('Site URL', engine.ds.rest.webUrl)); }} />
+            </Card>
             <Card title="WhatsApp Business" wide>
               <Stack tokens={{ childrenGap: 8 }}>
                 <Stack horizontal wrap tokens={{ childrenGap: 16 }} verticalAlign="end">
@@ -505,6 +567,9 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
                 <li><b>Quote discount approval</b> – Approvals in Teams/Outlook for quotes over {s.quote.approvalDiscountPct}% discount</li>
                 <li><b>Quote e-signature</b> – signing page for customers; records name, title, IP and time <i>(Premium)</i></li>
                 <li><b>WhatsApp send / inbound</b> – WhatsApp Business Cloud API: queued messages and templates out, replies and new leads in <i>(Premium)</i></li>
+                <li><b>Case satisfaction survey</b> – one-click 1–5 rating page, alerts on low scores <i>(Premium)</i></li>
+                <li><b>Unsubscribe</b> – personal unsubscribe page for marketing emails <i>(Premium)</i></li>
+                <li><b>Inbound API</b> – create, update or read leads, contacts, accounts, deals, cases and activities from other systems <i>(Premium)</i></li>
                 <li><b>Email to case</b> – support mailbox → cases; replies with [case number] go to the same case</li>
                 <li><b>Razorpay / Stripe payment link</b> – creates a pay link when an invoice asks for one <i>(Premium)</i></li>
                 <li><b>Razorpay / Stripe payment received</b> – payment webhook marks the invoice Paid <i>(Premium)</i></li>

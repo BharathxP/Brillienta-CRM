@@ -1,6 +1,6 @@
 # Brillienta CRM: Power Automate flow pack
 
-`dist/BrillientaCRMFlows_1_4_0_0.zip` is an **unmanaged Power Platform solution** containing 16 ready-made cloud flows, 4 connection references and 15 environment variables. Admins can also download it from the CRM (**Settings › Integrations › Download Power Automate solution**), already filled in for their site. To rebuild it, run `node flows/build-solution.mjs`. The build checks every flow before zipping.
+`dist/BrillientaCRMFlows_1_5_0_0.zip` is an **unmanaged Power Platform solution** containing 20 ready-made cloud flows, 4 connection references and 16 environment variables. Admins can also download it from the CRM (**Settings › Integrations › Download Power Automate solution**), already filled in for their site. To rebuild it, run `node flows/build-solution.mjs`. The build checks every flow before zipping.
 
 ## The flows
 
@@ -21,6 +21,9 @@
 | **Stripe payment received** | Stripe webhook `checkout.session.completed` | Re-reads the Checkout Session from the Stripe API, then marks the invoice *Paid* | **Premium** |
 | **WhatsApp send** | Activity with WhatsApp status *Queued* (CRM › WhatsApp › Send) | Sends an approved template (with its values) or free text through the WhatsApp Business Cloud API, and writes *Sent* / *Failed* back | **Premium** |
 | **WhatsApp inbound** | Meta webhook | Answers Meta's verification, logs incoming messages on the contact or lead whose number matches (unknown numbers become WhatsApp leads), and updates the delivery and read status of sent messages | **Premium** |
+| **Case satisfaction survey** | HTTP request (link in the survey email the CRM sends on resolve) | Saves the 1–5 score on the case immediately, offers a comment box, and emails the support manager (owner in Cc) about scores of 1–2 | **Premium** |
+| **Unsubscribe** | HTTP request (link in every campaign email) | Shows a confirmation button (so link scanners can't unsubscribe people), then sets *Unsubscribed*, clears marketing consent and logs it | **Premium** |
+| **Inbound API** | HTTP request with `x-api-key` | `{"entity": "leads", "action": "upsert", "match": {"field": "Email", "value": "a@b.com"}, "fields": {"FirstName": "Ann", "LeadSource": "Partner"}}`: creates, updates or reads records in any CRM list via SharePoint REST. Field names are SharePoint column names; choice values are plain text; lookups such as `AccountRef` are item IDs. Returns `{"id", "action"}`, or 400, 401 or 404 | **Premium** |
 | **Quote discount approval** | Quote's *Approval* changes to *Pending* (the rep clicks **Request approval** in the CRM) | Sends an **Approvals** request to the sales manager in Teams and Outlook. Writes *Approved* / *Rejected* and the comments back to the quote, and emails the rep | Standard |
 
 The CRM enforces the approval step. A quote whose total discount is above **Settings › Company › Quotes › "Discount needing manager approval"** (default 15%) can't be emailed or marked accepted until the flow approves it. If the total changes after approval, the quote needs approving again.
@@ -45,6 +48,7 @@ The CRM enforces the approval step. A quote whose total discount is above **Sett
    | Razorpay key id / key secret | from Razorpay › API keys, or leave `not-set` |
    | Stripe secret key | restricted key `rk_…`, or leave `not-set` |
    | WhatsApp phone number ID / access token / webhook verify token | from Meta › WhatsApp › API setup, or leave `not-set` |
+   | Inbound API key | long random secret for the `x-api-key` header; the API stays closed while it is `not-set` |
 
    The payment and WhatsApp keys are **not** asked for in the CRM's download dialog, so they never pass through the browser. Enter them here, and use Azure Key Vault secret environment variables if your organisation requires that.
 
@@ -53,7 +57,8 @@ The CRM enforces the approval step. A quote whose total discount is above **Sett
 6. **E-signature:** turn on *Quote e-signature*, copy its **HTTP URL** and paste it in the CRM under **Settings › Company › E-signature link**. Reps then see **Send for e-signature** on approved quotes.
 7. **Payments:** turn on the Razorpay or Stripe flows, choose the provider in **Settings › Company › Online payment links**, and add the *payment received* flow's HTTP URL as a webhook: Razorpay › Webhooks (`payment_link.paid`) or Stripe › Developers › Webhooks (`checkout.session.completed`).
 8. **WhatsApp Cloud API:** create the approved templates in WhatsApp Manager (the defaults are `crm_intro`, `crm_demo_reminder`, `crm_quote_followup` and `crm_payment_reminder`, or rename them in the CRM). Turn on both WhatsApp flows, set Meta › WhatsApp › Configuration › Webhook to the *WhatsApp inbound* HTTP URL with your verify token, subscribe to **messages**, and set **Settings › Integrations › WhatsApp › How messages are sent** to Cloud API.
-9. **AppSource only:** open *AppSource lead intake*, copy the **HTTP URL** from the trigger, paste it in Partner Center (*Customer leads › HTTPS endpoint*) and click **Validate**.
+9. **Surveys and unsubscribe:** turn on *Case satisfaction survey* and *Unsubscribe*. Paste their HTTP URLs in the CRM: **Settings › Company › Satisfaction survey link** and **Settings › Integrations › Email marketing › Unsubscribe link**.
+10. **AppSource only:** open *AppSource lead intake*, copy the **HTTP URL** from the trigger, paste it in Partner Center (*Customer leads › HTTPS endpoint*) and click **Validate**.
 
 ## Notes and requirements
 

@@ -2,6 +2,19 @@
 
 A complete CRM delivered as one SharePoint Framework (SPFx 1.24) web part. All data is stored in SharePoint lists **in the customer's own Microsoft 365 tenant**. There is no external database or server.
 
+## What's new in 2.2
+
+* **Sales sequences:** timed emails, calls, WhatsApp messages and tasks for leads and contacts. Email steps are sent automatically or with one click, and a reply stops the sequence.
+* **Duplicate merge** for leads, contacts and accounts: choose which values to keep, and every deal, quote, case and activity moves over.
+* **Knowledge base**, with matching articles suggested on each case, "reply with this", and usage counts.
+* **Customer satisfaction:** a one-click 1–5 survey when a case is resolved, low-score alerts, and CSAT in Reports.
+* **Click-to-call** (Teams or phone) with a call timer, outcome, notes and a follow-up task.
+* **GDPR:** personal-data export (access request), right to erasure, and a consent history on the timeline.
+* **Email marketing:** campaign emails to consented leads and contacts with a personal unsubscribe page, or export the audience to Mailchimp / Brevo.
+* **Inbound REST API** (create / upsert / get) for other systems, plus a **Power BI** connection guide.
+
+Upgrading from 2.1: deploy the `.sppkg`, click **Update lists** (adds the `CRM Knowledge Base` list and new columns), then re-import the flow pack (1.5, 20 flows).
+
 ## What's new in 2.1
 
 * **Outlook sync:** email and meetings with customers are logged automatically.
@@ -24,9 +37,11 @@ Upgrading from 2.0: deploy the new `.sppkg`, open the CRM as an administrator an
 | **Quotes & products** | Price list · quote line items (discount and tax per line) · automatic numbering `Q-2026-0001` · branded **print/PDF** with logo and terms · **manager approval for large discounts** · email the quote · **e-signature**: a single-use signing link; the customer signs online, and name, job title, IP address, time and a snapshot of the signed quote are recorded. A signed quote closes the deal and creates its subscriptions automatically |
 | **Subscriptions & invoicing** | Subscriptions with seats, billing cycle, **MRR/ARR**, renewal date and auto-renew, created from a quote's recurring lines · **automatic renewal opportunities** N days before annual renewals (a won renewal extends the term; a lost one cancels it) · monthly roll-over and expiry · **invoices** `INV-2026-0001` from quotes or subscriptions, with payment terms, partial payments, overdue tracking, branded print/PDF and bank details · **Razorpay / Stripe payment links** with automatic "paid" updates · **accounting export** for Zoho Books, QuickBooks Online, Xero, Tally (XML vouchers) and generic CSV |
 | **Demo requests** | Created from leads or manually · **one-click Teams meeting** with Outlook invitations · agenda · no-show tracking · convert to opportunity |
-| **Campaigns** | Budget/cost · lead & deal attribution · **ROI** |
+| **Campaigns** | Budget/cost · lead & deal attribution · **ROI** · **email campaigns** to consented leads and contacts (filters by tag, source and country; personal unsubscribe link; company footer; Outlook-safe sending pace; up to 500 per run) · audience export for Mailchimp / Brevo |
+| **Sequences** | Multi-step cadences (email, call, WhatsApp, task on day N). Bulk-enrol from the grid. Due steps run when the owner opens the CRM. Email steps go out automatically or become one-click tasks. A reply by email or WhatsApp stops the sequence |
+| **Knowledge base** | Articles with category, product, keywords and a public link. On each case the best matches are suggested (published only); "Reply with this" puts the answer into the email and links the article. Usage counts show which answers help most |
 | **Cases (service)** | **Email-to-case** from a shared support mailbox: replies with `[CS-2026-0042]` in the subject thread onto the case and reopen it, and new senders get an automatic acknowledgement · numbering `CS-YEAR-ID` · **first-response and resolution SLAs** per priority, counted in **business hours** (time zone, working days, holidays) · the SLA clock pauses while *Waiting on customer* · breach alerts · reply, resolve, escalate |
-| **Activities** | Calls, emails, meetings, WhatsApp, notes, tasks on every record · timeline · **automatic Outlook logging** of email and meetings with known contacts and leads |
+| **Activities** | Calls (**click-to-call with Teams or phone**, timer, outcome, follow-up), emails, meetings, WhatsApp, notes, tasks on every record · timeline · **automatic Outlook logging** of email and meetings with known contacts and leads |
 | **AI assistance** | A **smart summary** on every record (situation, risks, next best actions) · **follow-up email drafts** · an **Ask Copilot** hand-off to Microsoft 365 Copilot · a downloadable **Microsoft 365 Copilot agent** grounded in the CRM site |
 | **Insights** | **Forecast** per quarter (closed / commit / best case / pipeline) with **quotas & attainment**, slipping deals · **Reports**: leaderboard, win/loss reasons, funnel, source performance, campaign ROI, quote and service metrics · CSV export everywhere |
 | **Productivity** | Global search · quick-create · notifications · saved views · column chooser · bulk edit/assign/delete · CSV import with column mapping · mobile layout · dark mode / section themes · Teams tab & personal app |
@@ -39,18 +54,22 @@ Upgrading from 2.0: deploy the new `.sppkg`, open the CRM as an administrator an
 | **Outlook sync** | Per-user opt-in (My work › Turn on). Every 15 minutes while the CRM is open, it reads the user's inbox, sent items and calendar (`Mail.Read`, `Calendars.ReadWrite`) and logs conversations and meetings with known contacts and leads on their timelines, with a link back to Outlook. Internal mail is never logged, and items are de-duplicated |
 | **WhatsApp Business** | **Click to chat** (free; opens WhatsApp with the message and a template filled in) or the **WhatsApp Business Cloud API** through Power Automate, which sends approved templates and free text and receives replies, with delivery and read status. Unknown numbers become WhatsApp leads. Everything is logged on the timeline |
 | **Microsoft 365 Copilot** | Settings › Integrations › **Download Copilot agent**. This is a declarative agent (Teams manifest 1.19) whose knowledge is the CRM site, so it answers with each user's own permissions. Upload it in the Teams admin center. It needs Microsoft 365 Copilot licences |
+| **Inbound REST API** | Power Automate flow *Inbound API*: `POST {entity, action: create/upsert/get, match: {field, value}, fields}` with an `x-api-key` header, for ERPs, billing systems, Zapier or Make |
+| **Power BI** | Settings › Integrations › Power BI: connect Power BI Desktop to the CRM lists (SharePoint Online list 2.0), with the relationships documented. Data stays protected by SharePoint permissions |
 | **Payments** | Razorpay and Stripe payment links and payment webhooks through Power Automate. API keys never reach the browser |
 | **Teams meetings** | Creates an Outlook event with a Teams link (`Calendars.ReadWrite`) and stores the join URL on the demo |
 | **Teams channel alerts** | Teams *Workflows* webhook: new leads, demo requests, deals won, cases |
 | **AppSource / Partner Center** | HTTPS endpoint → Power Automate → leads list (see below) |
 | **Webhooks** | 27 events (`lead.created`, `opportunity.won`, `case.created`, …) to Power Automate, Logic Apps, Zapier, Make, n8n or your own API |
 | **Data** | CSV import/export (Excel, HubSpot, Salesforce, Dynamics exports) · full JSON backup |
-| **Power Automate flow pack** | 16 ready-made flows as an importable solution (`flows/dist/BrillientaCRMFlows_1_4_0_0.zip`, also downloadable from Settings › Integrations): AppSource lead intake, website leads/demos/support, new lead alert, daily digest, overdue reminders, case SLA escalation, deal-won handoff, quote discount approval, **quote e-signature**, **email to case**, **Razorpay/Stripe payment link and payment received**, **WhatsApp send/inbound**. See `flows/README.md` |
+| **Power Automate flow pack** | 20 ready-made flows as an importable solution (`flows/dist/BrillientaCRMFlows_1_5_0_0.zip`, also downloadable from Settings › Integrations): AppSource lead intake, website leads/demos/support, new lead alert, daily digest, overdue reminders, case SLA escalation, deal-won handoff, quote discount approval, **quote e-signature**, **email to case**, **Razorpay/Stripe payment link and payment received**, **WhatsApp send/inbound**, **case satisfaction survey**, **unsubscribe**, **inbound API**. See `flows/README.md` |
 
 ## Enterprise features
 
 * **Role-based access** through SharePoint groups: Administrators, Sales managers, Sales, Support, Readers. Setting them up creates the groups and grants list permissions. You can optionally restrict reps to their own records.
 * **Audit log** of who changed which field, when, and from what to what. It's shown on every record and on an admin page.
+* **Duplicate merge**, with references and timelines moved to the surviving record.
+* **Privacy / GDPR:** export everything held about a person as JSON, erase personal data (record, timeline, copies on deals, demos, cases and quotes, plus the audit history), unsubscribe flags, and consent changes logged automatically.
 * **Custom fields** for any record type. Admins add them in Settings and the SharePoint columns are created automatically.
 * Configurable pipeline stages, pick lists, scoring, SLAs, quotas, branding, currency and fiscal year.
 * **Licensing**: a 30-day trial, then signed licence keys tied to the customer's tenant (Standard / Enterprise plans).
@@ -82,7 +101,7 @@ tools/license/                  key generation and licence issuing (vendor-only,
 
 Every list, form, grid, board, filter, import and export is generated from `models/model.ts`. To add a module, add an entity definition there.
 
-**Lists created by Setup:** `AppSource Leads`, `CRM Accounts`, `CRM Contacts`, `CRM Opportunities`, `CRM Quotes`, `CRM Products`, `CRM Demo Requests`, `CRM Cases`, `CRM Campaigns`, `CRM Subscriptions`, `CRM Invoices`, `CRM Activities`, `CRM Settings`, `CRM Audit Log`. You can rename any of them per site in the web part properties. Version 1 data is upgraded in place, because Setup only adds the missing columns.
+**Lists created by Setup:** `AppSource Leads`, `CRM Accounts`, `CRM Contacts`, `CRM Opportunities`, `CRM Quotes`, `CRM Products`, `CRM Demo Requests`, `CRM Cases`, `CRM Campaigns`, `CRM Subscriptions`, `CRM Invoices`, `CRM Knowledge Base`, `CRM Activities`, `CRM Settings`, `CRM Audit Log`. You can rename any of them per site in the web part properties. Version 1 data is upgraded in place, because Setup only adds the missing columns.
 
 ## Build
 
