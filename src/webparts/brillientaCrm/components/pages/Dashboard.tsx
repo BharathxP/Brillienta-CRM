@@ -10,6 +10,8 @@ import { Pill, ScoreBadge } from '../core/controls';
 import { EmailDialog } from '../core/dialogs';
 import { COPILOT_CHAT_URL } from '../core/SmartSummary';
 import { draftFollowUp } from '../../services/Insights';
+import { IHelpdeskTicket, isOpenTicket } from '../../services/Helpdesk';
+import { TicketRow } from '../core/HelpdeskTickets';
 import {
   aiForecast, askCrm, ASK_EXAMPLES, briefing, dashboardPrompt, dealHealth, history, IAnswer, IDealHealth, IScope, nextActions, projectedMonths
 } from '../../services/DashboardAI';
@@ -69,11 +71,12 @@ interface IWidgetDef { id: string; title: string; icon: string; ai?: boolean; si
 const LAYOUT_KEY = 'brillienta-crm:dash-layout';
 const SCOPE_KEY = 'brillienta-crm:dash-scope';
 const DEFAULT_LAYOUT: IDashboardLayout = {
-  kpis: ['won', 'pipeline', 'leads', 'winrate', 'mrr', 'cases'],
+  kpis: ['won', 'pipeline', 'leads', 'winrate', 'mrr', 'cases', 'helpdesk'],
   widgets: [
     { id: 'actions', size: 'l' }, { id: 'forecast', size: 's' },
     { id: 'revenue', size: 'l' }, { id: 'pipeline', size: 's' },
-    { id: 'attention', size: 's' }, { id: 'hotLeads', size: 's' }, { id: 'tasks', size: 's' }
+    { id: 'attention', size: 's' }, { id: 'hotLeads', size: 's' }, { id: 'tasks', size: 's' },
+    { id: 'helpdesk', size: 'm' }
   ]
 };
 const SIZES: { key: WidgetSize; text: string }[] = [{ key: 's', text: 'Small (⅓)' }, { key: 'm', text: 'Medium (½)' }, { key: 'l', text: 'Large (⅔)' }, { key: 'xl', text: 'Full width' }];
@@ -100,6 +103,13 @@ export const Dashboard: React.FC = () => {
   const [answer, setAnswer] = React.useState<IAnswer>();
   const [draft, setDraft] = React.useState<{ key: EntityKey; r: IRecord }>();
   const [briefOpen, setBriefOpen] = React.useState(false);
+  const hdOn = engine.helpdesk.configured;
+  const [tickets, setTickets] = React.useState<IHelpdeskTicket[]>();
+  const [hdError, setHdError] = React.useState<string>();
+  React.useEffect(() => {
+    if (!hdOn) { return; }
+    engine.helpdesk.customerTickets().then(setTickets).catch(e => { setTickets([]); setHdError(String((e as Error).message || e)); });
+  }, [hdOn, data.contacts]);
 
   const teamIds = scope.indexOf('team:') === 0 ? engine.teamMemberIds(scope.slice(5)) : [];
   const mine = (r: IRecord): boolean => scope === 'all' || (scope === 'me' ? r.owner?.id === engine.me?.id : !!r.owner && teamIds.indexOf(r.owner.id) >= 0);
@@ -161,6 +171,7 @@ export const Dashboard: React.FC = () => {
     { id: 'demos', label: 'Demos to schedule', icon: 'Presentation', color: 'var(--series-2)', value: demos.filter(d => d.status === 'Requested').length, hint: `${demos.filter(d => d.status === 'Scheduled').length} scheduled`, spark: series((s, e) => demos.filter(d => inRange(d.created, s, e)).length), page: 'entity:demos', available: true },
     { id: 'mrr', label: 'MRR', icon: 'RecurringEvent', color: 'var(--series-3)', value: money(mrr), hint: `ARR ${money(mrr * 12)}`, page: 'entity:subscriptions', available: engine.hasFeature('subscriptions') && liveSubs.length > 0 },
     { id: 'unpaid', label: 'Unpaid invoices', icon: 'Money', color: 'var(--series-5)', value: money(sum(unpaid, x => engine.toBase((x.grandTotal || 0) - (x.amountPaid || 0), x.currency))), hint: `${unpaid.filter(x => x.invoiceStatus === 'Overdue').length} overdue`, page: 'entity:invoices', available: engine.hasFeature('invoices') },
+    { id: 'helpdesk', label: 'Helpdesk tickets', icon: 'Headset', color: 'var(--series-4)', value: tickets ? tickets.filter(isOpenTicket).length : '…', hint: tickets ? `${tickets.filter(t => isOpenTicket(t) && t.breached).length} past SLA · customers' open tickets` : 'loading from Brillienta Helpdesk', page: undefined, available: hdOn },
     { id: 'cases', label: 'Open cases', icon: 'Headset', color: 'var(--series-6)', value: openCases.length, hint: breached.length ? `${breached.length} past SLA` : 'all within SLA', spark: series((s, e) => cases.filter(c => inRange(c.created, s, e)).length), page: 'entity:cases', available: engine.hasFeature('cases') }
   ];
   const kpiById = (id: string): IKpiDef | undefined => kpis.find(k => k.id === id && k.available);
@@ -287,6 +298,14 @@ export const Dashboard: React.FC = () => {
           <Text variant="small" block className="crm-muted">{fmtDate(d.scheduledDate, true)} · {d.owner?.title || 'No presenter'}</Text>
         </Row>
       )))
+    },
+    {
+      id: 'helpdesk', title: 'Helpdesk tickets', icon: 'Headset', size: 'm', available: hdOn,
+      action: <Link href={engine.helpdesk.pageUrl()} target="_blank" data-interception="off">Open Helpdesk</Link>,
+      render: () => (hdError ? <Text className="crm-muted">Could not read Brillienta Helpdesk: {hdError}</Text>
+        : !tickets ? <Text className="crm-muted">Loading…</Text>
+          : tickets.filter(isOpenTicket).length === 0 ? <Empty text="No open tickets from your customers." />
+            : tickets.filter(isOpenTicket).slice(0, 10).map(t => <TicketRow key={t.id} t={t} sub={engine.helpdesk.accountOf(t)?.title || t.requester} />))
     },
     {
       id: 'cases', title: 'Open support cases', icon: 'Headset', size: 's', available: engine.hasFeature('cases'),

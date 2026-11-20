@@ -13,13 +13,6 @@ import { errorText, lsGet, lsSet, uid } from '../utils';
 
 const lines = (a: string[]): string => a.join('\n');
 const parseLines = (s: string): string[] => s.split('\n').map(x => x.trim()).filter((x, i, arr) => x && arr.indexOf(x) === i);
-const kv = (o: Record<string, number>): string => Object.keys(o).map(k => `${k} = ${o[k]}`).join('\n');
-const parseKv = (s: string): Record<string, number> => {
-  const out: Record<string, number> = {};
-  s.split('\n').forEach(l => { const m = l.split('='); if (m.length === 2 && m[0].trim()) { out[m[0].trim()] = Number(m[1]) || 0; } });
-  return out;
-};
-
 const TENANT_SITE_KEY = 'BrillientaCRM.SiteUrl';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -141,6 +134,203 @@ const Unit: React.FC<{ before?: string; after?: string; children?: React.ReactNo
 
 const urlError = (v: string): string | undefined => (v && !/^https:\/\//i.test(v) ? 'Must start with https://' : undefined);
 
+/** Friendly placeholder when a list is empty. */
+const EmptyNote: React.FC<{ icon: string; title: string; text?: React.ReactNode; action?: React.ReactNode }> = ({ icon, title, text, action }) => (
+  <div className="crm-empty-state">
+    <Icon iconName={icon} />
+    <Text block styles={{ root: { fontWeight: 600 } }}>{title}</Text>
+    {text && <Text block className="crm-muted">{text}</Text>}
+    {action && <div style={{ marginTop: 10 }}>{action}</div>}
+  </div>
+);
+
+/** Collapsed "more details" block for technical notes. */
+const Disclosure: React.FC<{ label: string; children?: React.ReactNode; defaultOpen?: boolean }> = ({ label, children, defaultOpen }) => {
+  const [open, setOpen] = React.useState(!!defaultOpen);
+  return (
+    <div className="crm-disclosure">
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}><Icon iconName={open ? 'ChevronDown' : 'ChevronRight'} /> {label}</button>
+      {open && <div className="crm-disclosure-body">{children}</div>}
+    </div>
+  );
+};
+
+/** Editable list of values shown as chips (pick lists, holidays, domains, countries). */
+const ChipList: React.FC<{ label: string; values: string[]; onChange: (v: string[]) => void; placeholder?: string; type?: string; normalize?: (v: string) => string }> =
+  ({ label, values, onChange, placeholder, type, normalize }) => {
+    const [text, setText] = React.useState('');
+    const add = (): void => {
+      const parts = text.split(type === 'date' ? /\s+/ : /[,\n]/).map(x => (normalize ? normalize(x.trim()) : x.trim())).filter(Boolean);
+      const next = [...values];
+      parts.forEach(p => { if (next.indexOf(p) < 0) { next.push(p); } });
+      if (parts.length) { onChange(next); }
+      setText('');
+    };
+    return (
+      <div className="crm-chips-edit">
+        <div className="crm-chips" role="list" aria-label={label}>
+          {values.map((v, i) => (
+            <span key={v} className="crm-chip-x" role="listitem">
+              {v}
+              <button type="button" aria-label={`Remove ${v}`} onClick={() => onChange(values.filter((_, j) => j !== i))}><Icon iconName="Cancel" /></button>
+            </span>
+          ))}
+          {!values.length && <Text className="crm-muted">None yet.</Text>}
+        </div>
+        <Stack horizontal tokens={{ childrenGap: 6 }} styles={{ root: { marginTop: 6 } }}>
+          <TextField ariaLabel={`Add to ${label}`} type={type} placeholder={placeholder || 'Add a value'} value={text} styles={{ root: { flex: 1, maxWidth: 320 } }}
+            onChange={(_, v) => setText(v || '')} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }} />
+          <DefaultButton text="Add" iconProps={{ iconName: 'Add' }} disabled={!text.trim()} onClick={add} />
+        </Stack>
+      </div>
+    );
+  };
+
+/** Points per value, as a small table ("Hot → 30"). Fixed rows when `fixed` is given, otherwise rows can be added. */
+const PointsTable: React.FC<{ label: string; points: Record<string, number>; fixed?: string[]; onChange: (p: Record<string, number>) => void; addLabel?: string }> =
+  ({ label, points, fixed, onChange, addLabel }) => {
+    const keys = fixed || Object.keys(points);
+    const [newKey, setNewKey] = React.useState('');
+    return (
+      <div className="crm-points" role="table" aria-label={label}>
+        {keys.map(k => (
+          <div key={k} className="crm-points-row" role="row">
+            <Text role="cell" styles={{ root: { flex: 1, minWidth: 0 } }}>{k}</Text>
+            <TextField role="cell" ariaLabel={`${k} points`} type="number" value={String(points[k] ?? 0)} styles={{ root: { width: 90 } }}
+              onChange={(_, v) => onChange({ ...points, [k]: Number(v) || 0 })} />
+            <Text className="crm-muted" role="cell">points</Text>
+            {!fixed && <IconButton iconProps={{ iconName: 'Cancel' }} ariaLabel={`Remove ${k}`} onClick={() => { const n = { ...points }; delete n[k]; onChange(n); }} />}
+          </div>
+        ))}
+        {!fixed && (
+          <Stack horizontal tokens={{ childrenGap: 6 }} styles={{ root: { marginTop: 6 } }}>
+            <TextField ariaLabel={addLabel || 'New value'} placeholder={addLabel || 'New value'} value={newKey} onChange={(_, v) => setNewKey(v || '')} styles={{ root: { width: 200 } }}
+              onKeyDown={e => { if (e.key === 'Enter' && newKey.trim()) { e.preventDefault(); onChange({ ...points, [newKey.trim()]: 10 }); setNewKey(''); } }} />
+            <DefaultButton text="Add" iconProps={{ iconName: 'Add' }} disabled={!newKey.trim()} onClick={() => { onChange({ ...points, [newKey.trim()]: 10 }); setNewKey(''); }} />
+          </Stack>
+        )}
+      </div>
+    );
+  };
+
+/** Link to a Power Automate flow, with its status and how to get the link. */
+const FlowLink: React.FC<{ label: string; flow: string; value: string; onChange: (v: string) => void; whatFor: string; onShowFlows?: () => void }> =
+  ({ label, flow, value, onChange, whatFor, onShowFlows }) => {
+    const ok = /^https:\/\//i.test(value);
+    return (
+      <div className="crm-flowlink">
+        <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 8 }}>
+          <span className={`crm-status ${ok ? 'crm-status-on' : 'crm-status-off'}`}>{ok ? 'Connected' : 'Not connected'}</span>
+          <Text variant="small" className="crm-muted">{whatFor}</Text>
+        </Stack>
+        <TextField ariaLabel={label} placeholder="Paste the flow link (https://…)" value={value} errorMessage={urlError(value)} styles={{ root: { marginTop: 6 } }} onChange={(_, v) => onChange((v || '').trim())} />
+        <Disclosure label="How do I get this link?">
+          <ol className="crm-ul">
+            <li>Import the CRM flow pack once: {onShowFlows ? <Link onClick={onShowFlows}>Settings › Power Automate</Link> : 'Settings › Power Automate'}.</li>
+            <li>In Power Automate, open the flow <b>{flow}</b> and turn it on.</li>
+            <li>Open its first step, <b>When an HTTP request is received</b>, and copy the <b>HTTP URL</b>.</li>
+            <li>Paste it here and save. Leave it empty to switch this feature off.</li>
+          </ol>
+        </Disclosure>
+      </div>
+    );
+  };
+
+/** Clickable placeholder chips: a click copies {{name}} to the clipboard. */
+const Placeholders: React.FC<{ names: string[] }> = ({ names }) => {
+  const { notify } = useCrm();
+  const copy = (n: string): void => {
+    const v = `{{${n}}}`;
+    (navigator.clipboard ? navigator.clipboard.writeText(v) : Promise.reject(new Error('no clipboard'))).then(() => notify(`Copied ${v}. Paste it into the message.`)).catch(() => window.prompt('Copy', v));
+  };
+  return (
+    <div className="crm-ph">
+      <Text variant="small" className="crm-muted">Insert details (click to copy):</Text>
+      {names.map(n => <button key={n} type="button" className="crm-ph-chip" onClick={() => copy(n)}>{n}</button>)}
+    </div>
+  );
+};
+
+/** A template shown as a one-line summary that expands into its editor. */
+const TemplateCard: React.FC<{ name: string; summary: string; onDelete: () => void; children?: React.ReactNode; startOpen?: boolean }> = ({ name, summary, onDelete, children, startOpen }) => {
+  const [open, setOpen] = React.useState(!!startOpen);
+  return (
+    <div className={`crm-tpl${open ? ' open' : ''}`}>
+      <div className="crm-tpl-head">
+        <button type="button" className="crm-tpl-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+          <Icon iconName={open ? 'ChevronDown' : 'ChevronRight'} />
+          <span><b>{name || 'Untitled'}</b><span className="crm-muted">{summary}</span></span>
+        </button>
+        <IconButton iconProps={{ iconName: 'Delete' }} ariaLabel={`Delete ${name}`} onClick={onDelete} />
+      </div>
+      {open && <div className="crm-tpl-body">{children}</div>}
+    </div>
+  );
+};
+
+const EMAIL_PLACEHOLDERS = ['firstName', 'lastName', 'fullName', 'company', 'product', 'ownerName', 'senderName', 'companyName', 'scheduledDate', 'meetingLink', 'quoteNumber', 'total'];
+const WA_PLACEHOLDERS = ['firstName', 'company', 'senderName', 'companyName', 'quoteNumber', 'invoiceNumber', 'total', 'paymentLink', 'scheduledDate', 'meetingLink', 'caseNumber'];
+
+const timeZones = (): string[] => {
+  try { const f = (Intl as any).supportedValuesOf; if (typeof f === 'function') { return f('timeZone') as string[]; } } catch { /* older browsers */ }
+  return ['UTC', 'Asia/Kolkata', 'Asia/Dubai', 'Asia/Singapore', 'Europe/London', 'Europe/Berlin', 'Europe/Paris', 'America/New_York', 'America/Chicago', 'America/Los_Angeles', 'Australia/Sydney'];
+};
+
+/** Brillienta Helpdesk connection. */
+const HelpdeskGroup: React.FC<{ s: ICrmSettings; upd: (patch: Partial<ICrmSettings>) => void }> = ({ s, upd }) => {
+  const { engine } = useCrm();
+  const h = s.helpdesk;
+  const set = (p: Partial<ICrmSettings['helpdesk']>): void => upd({ helpdesk: { ...h, ...p } });
+  const [test, setTest] = React.useState<{ ok: boolean; text: string }>();
+  const [busy, setBusy] = React.useState(false);
+  const run = (): void => {
+    setBusy(true); setTest(undefined);
+    engine.helpdesk.test(h.siteUrl, h.listPrefix)
+      .then(r => { setBusy(false); setTest({ ok: true, text: `Connected. You can see ${r.visible}${r.visible >= 500 ? '+' : ''} ticket(s).` }); })
+      .catch(e => {
+        setBusy(false);
+        const m = errorText(e);
+        setTest({ ok: false, text: /does not exist|404/i.test(m) ? `No Helpdesk tickets list “${h.listPrefix || 'HD_'}Tickets” on that site. Check the site address and the list prefix.` : /403|denied|401/i.test(m) ? 'You do not have access to the Helpdesk site.' : m });
+      });
+  };
+  const site = h.siteUrl.replace(/\/+$/, '');
+  return (
+    <>
+      <Group title="Connection" description="Brillienta Helpdesk is your service desk on Microsoft 365. Connect it to see each customer's tickets in the CRM and to raise tickets from accounts, contacts and cases.">
+        <Row label="Use Brillienta Helpdesk" help="Adds a “Support tickets” tab to accounts, contacts and cases, and a Helpdesk widget to the dashboard.">
+          <Toggle ariaLabel="Use Brillienta Helpdesk" checked={h.enabled} onChange={(_, c) => set({ enabled: !!c })} />
+        </Row>
+        <Row label="Helpdesk site" help="The address of the SharePoint site where Helpdesk is installed.">
+          <TextField ariaLabel="Helpdesk site" placeholder="https://contoso.sharepoint.com/sites/helpdesk" value={h.siteUrl} errorMessage={urlError(h.siteUrl)}
+            onChange={(_, v) => set({ siteUrl: (v || '').trim().replace(/\/SitePages\/.*$/i, '').replace(/\/+$/, '') })} />
+        </Row>
+        <Row label="Helpdesk page" help="The page with the Helpdesk app; tickets open there. Leave empty for SitePages/Helpdesk.aspx.">
+          <TextField ariaLabel="Helpdesk page" placeholder={site ? `${site}/SitePages/Helpdesk.aspx` : 'https://…/SitePages/Helpdesk.aspx'} value={h.pageUrl} errorMessage={urlError(h.pageUrl)} onChange={(_, v) => set({ pageUrl: (v || '').trim() })} />
+        </Row>
+        <Row label="Check the connection">
+          <Stack tokens={{ childrenGap: 6 }}>
+            <DefaultButton iconProps={{ iconName: 'PlugConnected' }} text={busy ? 'Checking…' : 'Test connection'} disabled={busy || !/^https:\/\//i.test(h.siteUrl)} onClick={run} styles={{ root: { alignSelf: 'flex-start' } }} />
+            {test && <MessageBar messageBarType={test.ok ? MessageBarType.success : MessageBarType.error} isMultiline>{test.text}</MessageBar>}
+          </Stack>
+        </Row>
+        <Disclosure label="Advanced">
+          <Row label="List prefix" help="Only change this if the Helpdesk web part uses another prefix (web part properties › List prefix).">
+            <TextField ariaLabel="Helpdesk list prefix" value={h.listPrefix} styles={{ root: { width: 140 } }} onChange={(_, v) => set({ listPrefix: (v || '').replace(/[^A-Za-z0-9_]/g, '') })} />
+          </Row>
+        </Disclosure>
+      </Group>
+      <Group title="How it works">
+        <ul className="crm-ul">
+          <li><b>Tickets on records:</b> an account shows the tickets of all its contacts (matched by email address); a contact shows their own tickets.</li>
+          <li><b>New ticket:</b> raised from an account, contact or case. Helpdesk gives it a number, assigns it and starts the SLA as soon as a Helpdesk agent has Helpdesk open.</li>
+          <li><b>Who sees what:</b> Helpdesk agents see every ticket. Other CRM users only see tickets they raised themselves.</li>
+          <li>Customers outside your organisation are recorded in the ticket description and linked to the CRM record, so their tickets still show up here.</li>
+        </ul>
+      </Group>
+    </>
+  );
+};
+
 // ================================================================ self-contained sections
 
 const CurrenciesGroup: React.FC<{ s: ICrmSettings; upd: (patch: Partial<ICrmSettings>) => void }> = ({ s, upd }) => (
@@ -170,7 +360,7 @@ const PriceBooksGroup: React.FC<{ s: ICrmSettings; upd: (patch: Partial<ICrmSett
     <Group title="Price books" description="A price book sets a quote's currency and prices (for example “Partners EUR” or “Education INR”). Products without a specific price use the list price, converted and minus the book discount."
       action={<DefaultButton iconProps={{ iconName: 'Add' }} text="New price book"
         onClick={() => upd({ priceBooks: [...s.priceBooks, { id: `pb${Date.now()}`, name: 'New price book', currency: s.currency, discountPct: 0, prices: {}, active: true }] })} />}>
-      {s.priceBooks.length === 0 && <Text className="crm-muted" block styles={{ root: { padding: '10px 0' } }}>No price books yet: quotes use the product list prices.</Text>}
+      {s.priceBooks.length === 0 && <EmptyNote icon="Money" title="No price books yet" text="Quotes use the prices from your product list. Add a price book for special prices, such as partner prices or prices in another currency." />}
       {s.priceBooks.map((b, i) => {
         const setB = (patch: Partial<typeof b>): void => upd({ priceBooks: s.priceBooks.map((x, j) => (j === i ? { ...x, ...patch } : x)) });
         const count = Object.keys(b.prices).filter(k => b.prices[k] !== undefined).length;
@@ -253,14 +443,16 @@ const TeamsGroups: React.FC<{ host: string; tenantSiteUrl: string }> = ({ host, 
   };
   return (
     <>
-      <Group title="Default CRM site" description="Teams tabs run on the team's own site and the personal app on the root site. The default CRM site tells them where the CRM data lives, so everyone works in one CRM.">
+      <Group title="Main CRM site" description="When people open the CRM in Teams or on another SharePoint site, it shows the data from this main site, so everyone works in the same CRM.">
         <Row label="Current default" help={isDefault ? 'This site.' : current ? 'Another site is the default.' : 'Not set yet.'}>
           <Text styles={{ root: { wordBreak: 'break-all' } }}>{current || '—'}</Text>
         </Row>
-        <Row label="Make this site the default" help={host !== 'sharepoint' ? 'Open the CRM in SharePoint to change this.' : 'Needs a SharePoint admin (tenant app catalog).'}>
+        <Row label="Use this site as the main CRM" help={host !== 'sharepoint' ? 'Open the CRM in SharePoint to change this.' : 'Needs a SharePoint admin (tenant app catalog).'}>
           <PrimaryButton text={isDefault ? 'This site is the default' : 'Use this site'} disabled={busy || isDefault || host !== 'sharepoint'} onClick={setDefault} />
         </Row>
-        <Text variant="small" className="crm-muted" block styles={{ root: { padding: '8px 0' } }}>PowerShell alternative: <code>Set-PnPStorageEntity -Key &quot;{TENANT_SITE_KEY}&quot; -Value &quot;{here}&quot; -Scope Tenant</code></Text>
+        <Disclosure label="For admins: set it with PowerShell">
+          <Text variant="small" block><code>Set-PnPStorageEntity -Key &quot;{TENANT_SITE_KEY}&quot; -Value &quot;{here}&quot; -Scope Tenant</code></Text>
+        </Disclosure>
       </Group>
       <Group title="Add Brillienta CRM to Teams">
         <ol className="crm-ul">
@@ -356,7 +548,7 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
   const lic = engine.license;
   const month = (i: number): string => new Date(2000, i, 1).toLocaleDateString(undefined, { month: 'long' });
   const toggleRow = (label: string, help: React.ReactNode, checked: boolean, onChange: (v: boolean) => void, disabled?: boolean): React.ReactNode => (
-    <Row label={label} help={help}><Toggle ariaLabel={label} checked={checked} disabled={disabled} onText="On" offText="Off" onChange={(_, c) => onChange(!!c)} /></Row>
+    <Row label={label} help={help}><Toggle ariaLabel={label} checked={checked} disabled={disabled} onChange={(_, c) => onChange(!!c)} /></Row>
   );
 
   // ---------------------------------------------------------------- checklist (overview)
@@ -371,7 +563,8 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
     { label: 'Quote e-signature link', done: !!s.quote.signingUrl, key: 'quotes', optional: true },
     { label: 'Customer portal and satisfaction survey links', done: !!(s.service.portalUrl && s.service.surveyUrl), key: 'portal', optional: true },
     { label: 'Unsubscribe link for email campaigns', done: !!s.marketing.unsubscribeUrl, key: 'marketing', optional: true },
-    { label: 'Security groups and record-level security', done: s.security.itemLevel, key: 'security', optional: true }
+    { label: 'Security groups and record-level security', done: s.security.itemLevel, key: 'security', optional: true },
+    { label: 'Brillienta Helpdesk connected', done: s.helpdesk.enabled && !!s.helpdesk.siteUrl, key: 'helpdesk', optional: true }
   ];
   const required = checks.filter(c => !c.optional);
 
@@ -449,8 +642,11 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
         <>
           <Group title="Licence">
             <MessageBar messageBarType={lic.status === 'active' ? MessageBarType.success : lic.status === 'trial' ? MessageBarType.info : MessageBarType.severeWarning} isMultiline styles={{ root: { margin: '10px 0' } }}>{lic.message}</MessageBar>
-            <Row label="Microsoft 365 tenant ID" help="Send this to Brillienta to receive a licence key."><TextField ariaLabel="Tenant ID" readOnly value={tenantId} /></Row>
-            <Row label="Licence key" help="Paste the key and save the settings to activate it."><TextField ariaLabel="Licence key" multiline rows={4} value={s.licenseKey} onChange={(_, v) => upd({ licenseKey: (v || '').trim() })} /></Row>
+            <Row label="Your Microsoft 365 tenant ID" help="Send this to Brillienta when you buy, to receive your licence key.">
+              <Stack horizontal tokens={{ childrenGap: 8 }}><TextField ariaLabel="Tenant ID" readOnly value={tenantId} styles={{ root: { flex: 1 } }} />
+                <DefaultButton iconProps={{ iconName: 'Copy' }} text="Copy" onClick={() => { (navigator.clipboard ? navigator.clipboard.writeText(tenantId) : Promise.reject(new Error('x'))).then(() => notify('Tenant ID copied.')).catch(() => window.prompt('Tenant ID', tenantId)); }} /></Stack>
+            </Row>
+            <Row label="Licence key" help="Paste the key you received, then click Save changes."><TextField ariaLabel="Licence key" multiline rows={4} value={s.licenseKey} onChange={(_, v) => upd({ licenseKey: (v || '').trim() })} /></Row>
           </Group>
           <Group title="Plans">
             <ul className="crm-ul">
@@ -496,13 +692,13 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
     },
     {
       key: 'picklists', group: 'Sales', title: 'Pick lists', icon: 'BulletedList', keywords: 'lead sources industries lost reasons case categories choices dropdown',
-      description: 'Choices offered in drop-downs. One value per line.',
+      description: 'The choices people pick from in drop-down lists.',
       render: () => (
-        <Group title="Pick lists" description="One value per line. Removing a value does not change existing records.">
-          <Row label="Lead sources"><TextField ariaLabel="Lead sources" multiline autoAdjustHeight rows={5} value={lines(s.leadSources)} onChange={(_, v) => upd({ leadSources: parseLines(v || '') })} /></Row>
-          <Row label="Industries"><TextField ariaLabel="Industries" multiline autoAdjustHeight rows={5} value={lines(s.industries)} onChange={(_, v) => upd({ industries: parseLines(v || '') })} /></Row>
-          <Row label="Lost reasons" help="Asked when a deal is marked lost."><TextField ariaLabel="Lost reasons" multiline autoAdjustHeight rows={4} value={lines(s.lostReasons)} onChange={(_, v) => upd({ lostReasons: parseLines(v || '') })} /></Row>
-          <Row label="Case categories"><TextField ariaLabel="Case categories" multiline autoAdjustHeight rows={4} value={lines(s.caseCategories)} onChange={(_, v) => upd({ caseCategories: parseLines(v || '') })} /></Row>
+        <Group title="Pick lists" description="Type a value and press Enter to add it. Removing a choice does not change records that already use it.">
+          <Row label="Lead sources" help="Where leads come from."><ChipList label="Lead sources" values={s.leadSources} onChange={v => upd({ leadSources: v })} /></Row>
+          <Row label="Industries"><ChipList label="Industries" values={s.industries} onChange={v => upd({ industries: v })} /></Row>
+          <Row label="Lost reasons" help="Asked when a deal is marked lost."><ChipList label="Lost reasons" values={s.lostReasons} onChange={v => upd({ lostReasons: v })} /></Row>
+          <Row label="Case categories"><ChipList label="Case categories" values={s.caseCategories} onChange={v => upd({ caseCategories: v })} /></Row>
         </Group>
       )
     },
@@ -511,9 +707,9 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
       description: 'How new leads are assigned, scored and completed.',
       render: () => (
         <>
-          <Group title="Assignment" description="Leads from a team's countries go to that team first (Teams & territories). The rest use this round-robin.">
-            {toggleRow('Assign new leads automatically', 'Round-robin across the reps below.', s.assignment.autoAssignNewLeads, v => upd({ assignment: { ...s.assignment, autoAssignNewLeads: v } }))}
-            <Row label="Round-robin reps" help="In this order.">
+          <Group title="Who gets new leads" description="Leads from a country covered by a sales team go to that team first (see Teams, territories & quotas). All other leads are shared in turn among the people below.">
+            {toggleRow('Assign new leads automatically', 'Each new lead goes to the next person in the list.', s.assignment.autoAssignNewLeads, v => upd({ assignment: { ...s.assignment, autoAssignNewLeads: v } }))}
+            <Row label="Share leads among" help="In this order.">
               <Stack tokens={{ childrenGap: 4 }}>
                 {s.assignment.roundRobin.map((u, i) => (
                   <Stack key={u.id} horizontal verticalAlign="center"><Text style={{ flex: 1 }}>{i + 1}. {u.title}</Text>
@@ -523,24 +719,28 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
               </Stack>
             </Row>
           </Group>
-          <Group title="Lead scoring (0–100)" description="Points per line, written as “value = points”.">
-            <Row label="Rating"><TextField ariaLabel="Rating points" multiline rows={3} value={kv(s.scoring.rating)} onChange={(_, v) => upd({ scoring: { ...s.scoring, rating: parseKv(v || '') } })} /></Row>
-            <Row label="Lead source"><TextField ariaLabel="Source points" multiline rows={5} value={kv(s.scoring.sources)} onChange={(_, v) => upd({ scoring: { ...s.scoring, sources: parseKv(v || '') } })} /></Row>
-            <Row label="Job title keywords" help="The best match counts.">
-              <TextField ariaLabel="Job title keywords" multiline rows={5} value={s.scoring.titleKeywords.map(k => `${k.keyword} = ${k.points}`).join('\n')}
-                onChange={(_, v) => { const m = parseKv(v || ''); upd({ scoring: { ...s.scoring, titleKeywords: Object.keys(m).map(k => ({ keyword: k, points: m[k] })) } }); }} />
+          <Group title="Lead scoring" description="Each lead gets a score from 0 to 100 that shows how promising it is. Points are added for the signals below.">
+            <Row label="Rating" help="The Hot / Warm / Cold rating set on the lead.">
+              <PointsTable label="Rating points" fixed={['Hot', 'Warm', 'Cold']} points={s.scoring.rating} onChange={p => upd({ scoring: { ...s.scoring, rating: p } })} />
             </Row>
-            <Row label="Other signals">
-              <Stack horizontal wrap tokens={{ childrenGap: 8 }}>
-                <TextField label="Has phone" type="number" value={String(s.scoring.hasPhone)} onChange={(_, v) => upd({ scoring: { ...s.scoring, hasPhone: Number(v) || 0 } })} styles={{ root: { width: 90 } }} />
-                <TextField label="Has company" type="number" value={String(s.scoring.hasCompany)} onChange={(_, v) => upd({ scoring: { ...s.scoring, hasCompany: Number(v) || 0 } })} styles={{ root: { width: 90 } }} />
-                <TextField label="Per activity" type="number" value={String(s.scoring.perActivity)} onChange={(_, v) => upd({ scoring: { ...s.scoring, perActivity: Number(v) || 0 } })} styles={{ root: { width: 90 } }} />
-                <TextField label="Activity max" type="number" value={String(s.scoring.maxActivityPoints)} onChange={(_, v) => upd({ scoring: { ...s.scoring, maxActivityPoints: Number(v) || 0 } })} styles={{ root: { width: 90 } }} />
+            <Row label="Lead source" help="Where the lead came from.">
+              <PointsTable label="Source points" fixed={s.leadSources} points={s.scoring.sources} onChange={p => upd({ scoring: { ...s.scoring, sources: p } })} />
+            </Row>
+            <Row label="Job title" help="Points when the job title contains a word. Only the best match counts.">
+              <PointsTable label="Job title points" addLabel="Word, e.g. Director" points={s.scoring.titleKeywords.reduce((o, k) => ({ ...o, [k.keyword]: k.points }), {} as Record<string, number>)}
+                onChange={p => upd({ scoring: { ...s.scoring, titleKeywords: Object.keys(p).map(k => ({ keyword: k, points: p[k] })) } })} />
+            </Row>
+            <Row label="Has a phone number"><Unit after="points"><TextField ariaLabel="Has phone points" type="number" value={String(s.scoring.hasPhone)} onChange={(_, v) => upd({ scoring: { ...s.scoring, hasPhone: Number(v) || 0 } })} styles={{ root: { width: 90 } }} /></Unit></Row>
+            <Row label="Has a company name"><Unit after="points"><TextField ariaLabel="Has company points" type="number" value={String(s.scoring.hasCompany)} onChange={(_, v) => upd({ scoring: { ...s.scoring, hasCompany: Number(v) || 0 } })} styles={{ root: { width: 90 } }} /></Unit></Row>
+            <Row label="Each logged activity" help="Emails, calls and meetings with the lead.">
+              <Stack horizontal verticalAlign="end" wrap tokens={{ childrenGap: 8 }}>
+                <Unit after="points each, up to"><TextField ariaLabel="Per activity points" type="number" value={String(s.scoring.perActivity)} onChange={(_, v) => upd({ scoring: { ...s.scoring, perActivity: Number(v) || 0 } })} styles={{ root: { width: 90 } }} /></Unit>
+                <Unit after="points"><TextField ariaLabel="Activity maximum points" type="number" value={String(s.scoring.maxActivityPoints)} onChange={(_, v) => upd({ scoring: { ...s.scoring, maxActivityPoints: Number(v) || 0 } })} styles={{ root: { width: 90 } }} /></Unit>
               </Stack>
             </Row>
           </Group>
           <Group title="Enrichment">
-            {toggleRow('Enrich new leads automatically', 'Leads with a business email get their website and company at once; the “Lead enrichment” flow adds company details.', s.enrichment.autoNewLeads, v => upd({ enrichment: { autoNewLeads: v } }))}
+            {toggleRow('Fill in company details automatically', 'When a lead has a business email address, its company name and website are filled in straight away. With the “Lead enrichment” flow turned on, industry and size are added too.', s.enrichment.autoNewLeads, v => upd({ enrichment: { autoNewLeads: v } }))}
           </Group>
         </>
       )
@@ -552,15 +752,14 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
         <>
           <Group title="Teams & territories" description="New leads from a team's countries are shared round-robin within that team. Dashboards and the forecast can be filtered by team."
             action={<DefaultButton iconProps={{ iconName: 'Add' }} text="New team" onClick={() => upd({ teams: [...s.teams, { id: `team${Date.now()}`, name: 'New team', members: [], territories: [], lastIndex: -1 }] })} />}>
-            {s.teams.length === 0 && <Text className="crm-muted" block styles={{ root: { padding: '10px 0' } }}>No teams yet.</Text>}
+            {s.teams.length === 0 && <EmptyNote icon="Group" title="No sales teams yet" text="Teams are optional. Create one to route leads by country and to see the forecast per team." />}
             {s.teams.map((t, i) => {
               const setT = (patch: Partial<typeof t>): void => upd({ teams: s.teams.map((x, j) => (j === i ? { ...x, ...patch } : x)) });
               return (
                 <Item key={t.id}>
                   <Stack horizontal wrap verticalAlign="end" tokens={{ childrenGap: 10 }}>
                     <TextField label="Team" value={t.name} onChange={(_, v) => setT({ name: v || '' })} styles={{ root: { width: 200 } }} />
-                    <TextField label="Territories (countries, comma separated)" value={t.territories.join(', ')} placeholder="India, UAE, Saudi Arabia" styles={{ root: { flex: 1, minWidth: 240 } }}
-                      onChange={(_, v) => setT({ territories: (v || '').split(',').map(x => x.trim()).filter(Boolean) })} />
+                    <div style={{ flex: 1, minWidth: 240 }}><Label>Countries this team covers</Label><ChipList label={`Countries for ${t.name}`} placeholder="Add a country" values={t.territories} onChange={v => setT({ territories: v })} /></div>
                     <IconButton iconProps={{ iconName: 'Delete' }} ariaLabel="Remove team" onClick={() => upd({ teams: s.teams.filter((_, j) => j !== i) })} />
                   </Stack>
                   <Stack horizontal wrap tokens={{ childrenGap: 24 }} style={{ marginTop: 8 }}>
@@ -582,7 +781,7 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
               );
             })}
           </Group>
-          <Group title="Quarterly quotas" description={`Target per rep per quarter, in ${s.currency}. Shown in the forecast.`}>
+          <Group title="Quarterly targets" description={`How much each person should win per quarter, in ${s.currency}. Shown in the forecast and the dashboard.`}>
             {s.quotas.map((qt, i) => (
               <Row key={qt.user.id} label={qt.user.title}>
                 <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 8 }}>
@@ -591,7 +790,7 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
                 </Stack>
               </Row>
             ))}
-            <Row label="Add a rep"><UserPicker showMe={false} onChange={u => { if (u && !s.quotas.some(x => x.user.id === u.id)) { upd({ quotas: [...s.quotas, { user: u, quarterly: 0 }] }); } }} /></Row>
+            <Row label="Add a person"><UserPicker showMe={false} onChange={u => { if (u && !s.quotas.some(x => x.user.id === u.id)) { upd({ quotas: [...s.quotas, { user: u, quarterly: 0 }] }); } }} /></Row>
           </Group>
         </>
       )
@@ -608,15 +807,15 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
             <Row label="Footer"><TextField ariaLabel="Quote footer" value={s.quote.footer} onChange={(_, v) => upd({ quote: { ...s.quote, footer: v || '' } })} /></Row>
           </Group>
           <Group title="Discount approval">
-            <Row label="Approval needed above" help="Quotes with a higher total discount need manager approval (flow “Quote discount approval”). 0 = off.">
+            <Row label="Ask a manager to approve discounts above" help="A quote with a bigger discount must be approved before it can be sent. Set 0 to switch approval off.">
               <Unit after="%"><TextField ariaLabel="Approval threshold" type="number" value={String(s.quote.approvalDiscountPct)} styles={{ root: { width: 140 } }} onChange={(_, v) => upd({ quote: { ...s.quote, approvalDiscountPct: Math.max(0, Number(v) || 0) } })} /></Unit>
             </Row>
           </Group>
-          <Group title="E-signature" description="Customers review and sign quotes online through the flow “Quote e-signature”.">
-            <Row label="Signing link" help="HTTP URL of the flow. Leave empty to turn e-signature off.">
-              <TextField ariaLabel="Signing link" placeholder="https://…" value={s.quote.signingUrl} errorMessage={urlError(s.quote.signingUrl)} onChange={(_, v) => upd({ quote: { ...s.quote, signingUrl: (v || '').trim() } })} />
+          <Group title="Online signing" description="Customers open the quote in their browser and accept it with their name, without printing anything.">
+            <Row label="Signing link">
+              <FlowLink label="Signing link" flow="Quote e-signature" whatFor="Needed for “Send for signature” on quotes." value={s.quote.signingUrl} onChange={v => upd({ quote: { ...s.quote, signingUrl: v } })} onShowFlows={() => go('flows')} />
             </Row>
-            {toggleRow('Signed quote wins the deal', 'Marks the linked opportunity as Closed Won.', s.quote.signatureClosesOpportunity, v => upd({ quote: { ...s.quote, signatureClosesOpportunity: v } }))}
+            {toggleRow('Mark the deal as won when the quote is signed', 'The linked opportunity moves to Closed Won.', s.quote.signatureClosesOpportunity, v => upd({ quote: { ...s.quote, signatureClosesOpportunity: v } }))}
           </Group>
         </>
       )
@@ -630,7 +829,7 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
       key: 'sequences', group: 'Sales', title: 'Sequences', icon: 'Send', keywords: 'cadence sequence steps follow up automation',
       description: 'Timed follow-up steps for leads and contacts.',
       render: () => (
-        <Group title="Sequences" description="Enrol leads or contacts from their grid or record. Due steps run when the owner opens the CRM. A reply by email or WhatsApp stops the sequence."
+        <Group title="Sequences" description="A sequence is a series of follow-ups (emails, calls, WhatsApp messages, tasks) spread over days. Start one from a lead or contact. It stops by itself when the person replies."
           action={<DefaultButton iconProps={{ iconName: 'Add' }} text="New sequence" onClick={() => upd({ sequences: [...s.sequences, { id: `seq${Date.now()}`, name: 'New sequence', autoSend: false, steps: [{ day: 0, type: 'Email', templateId: s.emailTemplates[0]?.id, title: 'First email' }] }] })} />}>
           {s.sequences.map((q, qi) => {
             const setQ = (patch: Partial<typeof q>): void => upd({ sequences: s.sequences.map((x, j) => (j === qi ? { ...x, ...patch } : x)) });
@@ -638,7 +837,7 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
               <Item key={q.id}>
                 <Stack horizontal wrap verticalAlign="end" tokens={{ childrenGap: 12 }}>
                   <TextField label="Sequence" value={q.name} onChange={(_, v) => setQ({ name: v || '' })} styles={{ root: { width: 260 } }} />
-                  <Toggle label="Send email steps automatically" inlineLabel checked={q.autoSend} onChange={(_, c) => setQ({ autoSend: !!c })} />
+                  <Toggle label="Send the emails without asking" inlineLabel checked={q.autoSend} onChange={(_, c) => setQ({ autoSend: !!c })} />
                   <IconButton iconProps={{ iconName: 'Delete' }} ariaLabel="Remove sequence" onClick={() => upd({ sequences: s.sequences.filter((_, j) => j !== qi) })} />
                 </Stack>
                 <div className="crm-seq-steps">
@@ -689,8 +888,8 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
       key: 'payments', group: 'Billing', title: 'Online payments', icon: 'PaymentCard', keywords: 'razorpay stripe payment link pay online',
       description: 'Razorpay or Stripe payment links on invoices.',
       render: () => (
-        <Group title="Payment links" description="Invoices get a “Create payment link” button; payments mark the invoice as paid. API keys stay in Power Automate, never in the browser.">
-          <Row label="Provider" help="Import and turn on the matching “payment link” and “payment received” flows.">
+        <Group title="Online payments" description="Customers can pay an invoice online with a link. When they pay, the invoice is marked as paid automatically. Your Razorpay or Stripe keys are kept in Power Automate, never in the CRM.">
+          <Row label="Payment service" help="Then turn on the matching “payment link” and “payment received” flows in Power Automate.">
             <Dropdown ariaLabel="Payment provider" selectedKey={s.payments.provider} options={[{ key: 'none', text: 'Off' }, { key: 'Razorpay', text: 'Razorpay' }, { key: 'Stripe', text: 'Stripe' }]}
               onChange={(_, o) => upd({ payments: { provider: (o?.key as 'none' | 'Razorpay' | 'Stripe') || 'none' } })} />
           </Row>
@@ -699,13 +898,13 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
     },
     {
       key: 'accounting', group: 'Billing', title: 'Accounting export', icon: 'Financial', keywords: 'tally xero zoho quickbooks ledger export',
-      description: 'Settings for Tally and Xero exports (Invoices › ⋯ › Export for accounting).',
+      description: 'Ledger names for exporting invoices to Tally and Xero.',
       render: () => (
-        <Group title="Accounting export" description="Zoho Books, QuickBooks Online and CSV need no settings.">
-          <Row label="Tally sales ledger"><TextField ariaLabel="Tally sales ledger" value={s.accounting.tallySalesLedger} onChange={(_, v) => upd({ accounting: { ...s.accounting, tallySalesLedger: v || '' } })} /></Row>
-          <Row label="Tally tax ledger"><TextField ariaLabel="Tally tax ledger" value={s.accounting.tallyTaxLedger} onChange={(_, v) => upd({ accounting: { ...s.accounting, tallyTaxLedger: v || '' } })} /></Row>
-          <Row label="Xero sales account code"><TextField ariaLabel="Xero account" value={s.accounting.xeroSalesAccount} onChange={(_, v) => upd({ accounting: { ...s.accounting, xeroSalesAccount: v || '' } })} /></Row>
-          <Row label="Xero tax type"><TextField ariaLabel="Xero tax type" value={s.accounting.xeroTaxType} onChange={(_, v) => upd({ accounting: { ...s.accounting, xeroTaxType: v || '' } })} /></Row>
+        <Group title="Accounting export" description="Export invoices from Invoices › ⋯ › Export for accounting. Zoho Books, QuickBooks Online and plain CSV need no settings; Tally and Xero need the names below.">
+          <Row label="Tally sales ledger" help="Name of the ledger for sales income in Tally."><TextField ariaLabel="Tally sales ledger" value={s.accounting.tallySalesLedger} onChange={(_, v) => upd({ accounting: { ...s.accounting, tallySalesLedger: v || '' } })} /></Row>
+          <Row label="Tally tax ledger" help="Name of the ledger for output tax (GST/VAT)."><TextField ariaLabel="Tally tax ledger" value={s.accounting.tallyTaxLedger} onChange={(_, v) => upd({ accounting: { ...s.accounting, tallyTaxLedger: v || '' } })} /></Row>
+          <Row label="Xero sales account code" help="From Xero › Chart of accounts, e.g. 200."><TextField ariaLabel="Xero account" value={s.accounting.xeroSalesAccount} onChange={(_, v) => upd({ accounting: { ...s.accounting, xeroSalesAccount: v || '' } })} /></Row>
+          <Row label="Xero tax type" help="E.g. OUTPUT, OUTPUT2 or NONE."><TextField ariaLabel="Xero tax type" value={s.accounting.xeroTaxType} onChange={(_, v) => upd({ accounting: { ...s.accounting, xeroTaxType: v || '' } })} /></Row>
         </Group>
       )
     },
@@ -718,9 +917,9 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
           <Group title="Cases">
             <Row label="Number prefix" help={`New cases are numbered ${s.casePrefix || 'CS'}-${new Date().getFullYear()}-<ID>.`}><TextField ariaLabel="Case prefix" value={s.casePrefix} styles={{ root: { width: 120 } }} onChange={(_, v) => upd({ casePrefix: v || 'CS' })} /></Row>
           </Group>
-          <Group title="Service level agreements" description="Hours to the first response and to resolution, per priority.">
+          <Group title="Response targets (SLAs)" description="How many hours the team has to reply to a new case, and to solve it, depending on its priority.">
             <div className="crm-sla-table" style={{ padding: '10px 0' }}>
-              <Text variant="small" className="crm-muted">Priority</Text><Text variant="small" className="crm-muted">First response (h)</Text><Text variant="small" className="crm-muted">Resolve (h)</Text>
+              <Text variant="small" className="crm-muted">Priority</Text><Text variant="small" className="crm-muted">Reply within (hours)</Text><Text variant="small" className="crm-muted">Solve within (hours)</Text>
               {['Critical', 'High', 'Normal', 'Low'].map(p => (
                 <React.Fragment key={p}>
                   <Text>{p}</Text>
@@ -732,15 +931,15 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
             {toggleRow('Pause while waiting on the customer', 'The SLA clock stops while a case is “Waiting on customer”.', s.slaPauseWhenWaiting, v => upd({ slaPauseWhenWaiting: v }))}
           </Group>
           <Group title="Business hours">
-            {toggleRow('Count business hours only', 'Otherwise SLAs run around the clock.', s.businessHours.enabled, v => upd({ businessHours: { ...s.businessHours, enabled: v } }))}
+            {toggleRow('Count working hours only', 'Evenings, weekends and holidays are not counted. Otherwise the clock runs day and night.', s.businessHours.enabled, v => upd({ businessHours: { ...s.businessHours, enabled: v } }))}
             {s.businessHours.enabled && (
               <>
-                <Row label="Time zone" help="IANA name, e.g. Asia/Kolkata, Europe/London."><TextField ariaLabel="Time zone" value={s.businessHours.timeZone} onChange={(_, v) => upd({ businessHours: { ...s.businessHours, timeZone: (v || '').trim() } })} /></Row>
+                <Row label="Time zone" help="The time zone of your support team."><Dropdown ariaLabel="Time zone" selectedKey={s.businessHours.timeZone} options={timeZones().map(z => ({ key: z, text: z.replace(/_/g, ' ') }))} onChange={(_, o) => upd({ businessHours: { ...s.businessHours, timeZone: String(o?.key) } })} /></Row>
                 <Row label="Opening hours">
                   <Stack horizontal verticalAlign="center" tokens={{ childrenGap: 8 }}>
-                    <TextField ariaLabel="Opens" value={s.businessHours.start} placeholder="09:00" styles={{ root: { width: 90 } }} onChange={(_, v) => upd({ businessHours: { ...s.businessHours, start: v || '' } })} />
+                    <TextField ariaLabel="Opens" type="time" value={s.businessHours.start} placeholder="09:00" styles={{ root: { width: 120 } }} onChange={(_, v) => upd({ businessHours: { ...s.businessHours, start: v || '' } })} />
                     <Text>to</Text>
-                    <TextField ariaLabel="Closes" value={s.businessHours.end} placeholder="18:00" styles={{ root: { width: 90 } }} onChange={(_, v) => upd({ businessHours: { ...s.businessHours, end: v || '' } })} />
+                    <TextField ariaLabel="Closes" type="time" value={s.businessHours.end} placeholder="18:00" styles={{ root: { width: 120 } }} onChange={(_, v) => upd({ businessHours: { ...s.businessHours, end: v || '' } })} />
                   </Stack>
                 </Row>
                 <Row label="Working days">
@@ -751,8 +950,9 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
                     ))}
                   </Stack>
                 </Row>
-                <Row label="Holidays" help="YYYY-MM-DD, one per line."><TextField ariaLabel="Holidays" multiline rows={3} value={s.businessHours.holidays.join('\n')}
-                  onChange={(_, v) => upd({ businessHours: { ...s.businessHours, holidays: (v || '').split(/\s+/).filter(x => /^\d{4}-\d{2}-\d{2}$/.test(x)) } })} /></Row>
+                <Row label="Holidays" help="Days the team does not work.">
+                  <ChipList label="Holidays" type="date" placeholder="Pick a date" values={[...s.businessHours.holidays].sort()} onChange={v => upd({ businessHours: { ...s.businessHours, holidays: v.filter(x => /^\d{4}-\d{2}-\d{2}$/.test(x)) } })} />
+                </Row>
               </>
             )}
           </Group>
@@ -760,20 +960,25 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
       )
     },
     {
+      key: 'helpdesk', group: 'Service', title: 'Brillienta Helpdesk', icon: 'Headset', keywords: 'helpdesk tickets support service desk brillienta',
+      description: 'See customers’ Helpdesk tickets in the CRM and raise new ones.',
+      render: () => <HelpdeskGroup s={s} upd={upd} />
+    },
+    {
       key: 'portal', group: 'Service', title: 'Customer portal & surveys', icon: 'Emoji2', keywords: 'portal csat satisfaction survey customer self service',
-      description: 'Self-service portal and satisfaction surveys (Power Automate flows).',
+      description: 'A self-service page for customers, and satisfaction surveys.',
       render: () => (
         <>
-          <Group title="Customer portal" description="Customers sign in with an email link, follow their requests, reply and open new ones.">
-            <Row label="Portal link" help="HTTP URL of the flow “Customer portal”. Contacts then get “Invite to portal”.">
-              <TextField ariaLabel="Portal link" placeholder="https://…" value={s.service.portalUrl} errorMessage={urlError(s.service.portalUrl)} onChange={(_, v) => upd({ service: { ...s.service, portalUrl: (v || '').trim() } })} />
+          <Group title="Customer portal" description="A web page where customers sign in with a link sent by email, see their support cases, reply and open new ones.">
+            <Row label="Portal link">
+              <FlowLink label="Portal link" flow="Customer portal" whatFor="Needed for “Invite to portal” on contacts." value={s.service.portalUrl} onChange={v => upd({ service: { ...s.service, portalUrl: v } })} onShowFlows={() => go('flows')} />
             </Row>
           </Group>
-          <Group title="Satisfaction surveys">
-            <Row label="Survey link" help="HTTP URL of the flow “Case satisfaction survey”.">
-              <TextField ariaLabel="Survey link" placeholder="https://…" value={s.service.surveyUrl} errorMessage={urlError(s.service.surveyUrl)} onChange={(_, v) => upd({ service: { ...s.service, surveyUrl: (v || '').trim() } })} />
+          <Group title="Satisfaction surveys" description="After a case is solved, the customer can rate the help they got from 1 to 5 with one click.">
+            <Row label="Survey link">
+              <FlowLink label="Survey link" flow="Case satisfaction survey" whatFor="Needed to send surveys." value={s.service.surveyUrl} onChange={v => upd({ service: { ...s.service, surveyUrl: v } })} onShowFlows={() => go('flows')} />
             </Row>
-            {toggleRow('Send a survey when a case is resolved', 'A one-click 1–5 rating email to the customer.', s.service.surveyOnResolve, v => upd({ service: { ...s.service, surveyOnResolve: v } }))}
+            {toggleRow('Send a survey when a case is resolved', 'The customer gets a short email with the 1–5 rating.', s.service.surveyOnResolve, v => upd({ service: { ...s.service, surveyOnResolve: v } }))}
           </Group>
         </>
       )
@@ -781,65 +986,74 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
     // ============================================================ Communication
     {
       key: 'email', group: 'Communication', title: 'Outlook & email', icon: 'Mail', keywords: 'outlook graph mail send teams meetings sync logging calendar',
-      description: 'Send email, create Teams meetings and log Outlook conversations.',
+      description: 'Email customers from Outlook, book Teams meetings and save conversations to the CRM.',
       render: () => (
         <>
           <Group title="Microsoft 365">
-            {toggleRow('Send email from Outlook', 'From the user’s own mailbox (Microsoft Graph Mail.Send).', s.integrations.graphEmail, v => upd({ integrations: { ...s.integrations, graphEmail: v } }))}
-            {toggleRow('Create Teams meetings for demos', 'With Outlook invitations (Calendars.ReadWrite).', s.integrations.graphMeetings, v => upd({ integrations: { ...s.integrations, graphMeetings: v } }))}
-            {toggleRow('Allow Outlook sync', 'Each user turns it on in My work. Only email and meetings with known contacts and leads are logged (Mail.Read).', s.integrations.outlookSync, v => upd({ integrations: { ...s.integrations, outlookSync: v } }))}
+            {toggleRow('Send email from Outlook', 'Emails go out from each person’s own mailbox and appear in their Sent Items.', s.integrations.graphEmail, v => upd({ integrations: { ...s.integrations, graphEmail: v } }))}
+            {toggleRow('Create Teams meetings for demos', 'Booking a demo creates a Teams meeting and sends the Outlook invitation.', s.integrations.graphMeetings, v => upd({ integrations: { ...s.integrations, graphMeetings: v } }))}
+            {toggleRow('Allow Outlook sync', 'People can save their emails and meetings with customers to the CRM automatically (each person turns it on in My work). Only conversations with known contacts and leads are saved.', s.integrations.outlookSync, v => upd({ integrations: { ...s.integrations, outlookSync: v } }))}
             {s.integrations.outlookSync && (
               <>
-                <Row label="First sync reads the last"><Unit after="days"><TextField ariaLabel="Lookback days" type="number" value={String(s.integrations.syncLookbackDays)} styles={{ root: { width: 160 } }} onChange={(_, v) => upd({ integrations: { ...s.integrations, syncLookbackDays: Math.max(1, Math.min(365, Number(v) || 30)) } })} /></Unit></Row>
-                <Row label="Never log these domains" help="One per line. Your own domain is always excluded."><TextField ariaLabel="Excluded domains" multiline autoAdjustHeight rows={2} value={lines(s.integrations.internalDomains)} onChange={(_, v) => upd({ integrations: { ...s.integrations, internalDomains: parseLines(v || '') } })} /></Row>
+                <Row label="On first sync, look back"><Unit after="days"><TextField ariaLabel="Lookback days" type="number" value={String(s.integrations.syncLookbackDays)} styles={{ root: { width: 160 } }} onChange={(_, v) => upd({ integrations: { ...s.integrations, syncLookbackDays: Math.max(1, Math.min(365, Number(v) || 30)) } })} /></Unit></Row>
+                <Row label="Never save email from" help="Domains such as partners or suppliers. Your own domain is always skipped."><ChipList label="Excluded domains" placeholder="example.com" values={s.integrations.internalDomains} normalize={v => v.toLowerCase().replace(/^@/, '')} onChange={v => upd({ integrations: { ...s.integrations, internalDomains: v } })} /></Row>
               </>
             )}
-            <MessageBar isMultiline styles={{ root: { margin: '10px 0' } }}>One-time admin step: <b>SharePoint admin center › Advanced › API access</b> › approve Microsoft Graph Mail.Send, Mail.Read, Calendars.ReadWrite and User.ReadBasic.All.</MessageBar>
+            <Disclosure label="One-time setup by your Microsoft 365 admin">
+              <Text block>In the <b>SharePoint admin center › Advanced › API access</b>, approve the requests from Brillienta CRM (Microsoft Graph: Mail.Send, Mail.Read, Calendars.ReadWrite, User.ReadBasic.All). Until then, email and meetings are not available.</Text>
+            </Disclosure>
           </Group>
-          <Group title="Email templates" description={'Placeholders: {{firstName}} {{lastName}} {{fullName}} {{company}} {{product}} {{ownerName}} {{senderName}} {{scheduledDate}} {{meetingLink}} {{quoteNumber}} {{total}} {{companyName}}'}
+          <Group title="Email templates" description="Ready-made emails people can pick when they write to a customer. Details like the first name are filled in automatically."
             action={<DefaultButton iconProps={{ iconName: 'Add' }} text="Add template" onClick={() => upd({ emailTemplates: [...s.emailTemplates, { id: uid(), name: 'New template', subject: '', body: '' }] })} />}>
-            {s.emailTemplates.map((t, i) => (
-              <Item key={t.id}>
-                <Stack horizontal wrap tokens={{ childrenGap: 8 }} verticalAlign="end">
-                  <TextField label="Name" value={t.name} onChange={(_, v) => upd({ emailTemplates: s.emailTemplates.map((x, j) => (j === i ? { ...x, name: v || '' } : x)) })} styles={{ root: { width: 200 } }} />
-                  <TextField label="Subject" value={t.subject} onChange={(_, v) => upd({ emailTemplates: s.emailTemplates.map((x, j) => (j === i ? { ...x, subject: v || '' } : x)) })} styles={{ root: { flex: 1, minWidth: 220 } }} />
-                  <IconButton iconProps={{ iconName: 'Delete' }} ariaLabel="Delete template" onClick={() => upd({ emailTemplates: s.emailTemplates.filter((_, j) => j !== i) })} />
-                </Stack>
-                <TextField label="Body" multiline rows={5} value={t.body} onChange={(_, v) => upd({ emailTemplates: s.emailTemplates.map((x, j) => (j === i ? { ...x, body: v || '' } : x)) })} />
-              </Item>
-            ))}
+            <Placeholders names={EMAIL_PLACEHOLDERS} />
+            {s.emailTemplates.length === 0 && <EmptyNote icon="Mail" title="No email templates" />}
+            {s.emailTemplates.map((t, i) => {
+              const setT = (patch: Partial<typeof t>): void => upd({ emailTemplates: s.emailTemplates.map((x, j) => (j === i ? { ...x, ...patch } : x)) });
+              return (
+                <TemplateCard key={t.id} name={t.name} summary={t.subject || 'No subject'} startOpen={!t.subject} onDelete={() => upd({ emailTemplates: s.emailTemplates.filter((_, j) => j !== i) })}>
+                  <TextField label="Template name" value={t.name} onChange={(_, v) => setT({ name: v || '' })} />
+                  <TextField label="Subject" value={t.subject} onChange={(_, v) => setT({ subject: v || '' })} />
+                  <TextField label="Message" multiline autoAdjustHeight rows={6} value={t.body} onChange={(_, v) => setT({ body: v || '' })} />
+                </TemplateCard>
+              );
+            })}
           </Group>
         </>
       )
     },
     {
       key: 'whatsapp', group: 'Communication', title: 'WhatsApp', icon: 'Chat', keywords: 'whatsapp business cloud api templates country code',
-      description: 'Click-to-chat or the WhatsApp Business Cloud API, and message templates.',
+      description: 'Message customers on WhatsApp from their record, with ready-made messages.',
       render: () => (
         <>
           <Group title="WhatsApp">
-            {toggleRow('WhatsApp on records', 'Shows the WhatsApp command on leads, contacts, deals, cases and invoices.', s.whatsapp.enabled, v => upd({ whatsapp: { ...s.whatsapp, enabled: v } }))}
-            <Row label="How messages are sent" help="Cloud API needs the flows “WhatsApp send” and “WhatsApp inbound”; replies and new leads then come in automatically.">
-              <Dropdown ariaLabel="WhatsApp mode" selectedKey={s.whatsapp.mode} options={[{ key: 'click', text: 'Click to chat (WhatsApp app)' }, { key: 'cloud', text: 'WhatsApp Business Cloud API' }]}
+            {toggleRow('Use WhatsApp', 'Adds a WhatsApp button to leads, contacts, deals, cases and invoices.', s.whatsapp.enabled, v => upd({ whatsapp: { ...s.whatsapp, enabled: v } }))}
+            <Row label="How messages are sent" help={s.whatsapp.mode === 'cloud' ? 'Messages are sent from your WhatsApp Business number through the flows “WhatsApp send” and “WhatsApp inbound”. Replies and new contacts come into the CRM by themselves.' : 'WhatsApp opens on the user’s phone or computer with the message ready to send. Free, nothing to set up.'}>
+              <Dropdown ariaLabel="WhatsApp mode" selectedKey={s.whatsapp.mode} options={[{ key: 'click', text: 'From the WhatsApp app (simple)' }, { key: 'cloud', text: 'From our WhatsApp Business number (automatic)' }]}
                 onChange={(_, o) => upd({ whatsapp: { ...s.whatsapp, mode: (o?.key as 'click' | 'cloud') || 'click' } })} />
             </Row>
-            <Row label="Default country code" help="Added to local numbers."><Unit before="+"><TextField ariaLabel="Default country code" value={s.whatsapp.defaultCountryCode} styles={{ root: { width: 120 } }} onChange={(_, v) => upd({ whatsapp: { ...s.whatsapp, defaultCountryCode: (v || '').replace(/\D/g, '').slice(0, 4) } })} /></Unit></Row>
+            <Row label="Default country code" help="Added to phone numbers saved without one."><Unit before="+"><TextField ariaLabel="Default country code" value={s.whatsapp.defaultCountryCode} styles={{ root: { width: 120 } }} onChange={(_, v) => upd({ whatsapp: { ...s.whatsapp, defaultCountryCode: (v || '').replace(/\D/g, '').slice(0, 4) } })} /></Unit></Row>
           </Group>
-          <Group title="Templates" description={'Placeholders: {{firstName}} {{company}} {{senderName}} {{companyName}} {{quoteNumber}} {{invoiceNumber}} {{total}} {{paymentLink}} {{scheduledDate}} {{meetingLink}} {{caseNumber}}'}
+          <Group title="Message templates" description="Ready-made WhatsApp messages. Details like the first name are filled in automatically."
             action={<DefaultButton iconProps={{ iconName: 'Add' }} text="Add template" onClick={() => upd({ whatsapp: { ...s.whatsapp, templates: [...s.whatsapp.templates, { id: `t${Date.now()}`, name: 'New template', body: 'Hi {{firstName}}, ', language: 'en', params: ['firstName'] }] } })} />}>
+            <Placeholders names={WA_PLACEHOLDERS} />
             {s.whatsapp.templates.map((t, i) => {
               const setT = (patch: Partial<typeof t>): void => upd({ whatsapp: { ...s.whatsapp, templates: s.whatsapp.templates.map((x, j) => (j === i ? { ...x, ...patch } : x)) } });
               return (
-                <Item key={t.id}>
-                  <Stack horizontal wrap tokens={{ childrenGap: 8 }} verticalAlign="end">
-                    <TextField label="Template" value={t.name} onChange={(_, v) => setT({ name: v || '' })} styles={{ root: { width: 180 } }} />
-                    <TextField label="Approved name (Cloud API)" value={t.cloudName || ''} onChange={(_, v) => setT({ cloudName: (v || '').trim() })} styles={{ root: { width: 200 } }} />
-                    <TextField label="Language" value={t.language || ''} placeholder="en" onChange={(_, v) => setT({ language: (v || '').trim() })} styles={{ root: { width: 80 } }} />
-                    <TextField label="{{1}}, {{2}}… values" value={(t.params || []).join(', ')} placeholder="firstName, quoteNumber" onChange={(_, v) => setT({ params: (v || '').split(',').map(x => x.trim()).filter(Boolean) })} styles={{ root: { width: 220 } }} />
-                    <IconButton iconProps={{ iconName: 'Delete' }} ariaLabel="Remove template" onClick={() => upd({ whatsapp: { ...s.whatsapp, templates: s.whatsapp.templates.filter((_, j) => j !== i) } })} />
-                  </Stack>
-                  <TextField label="Message" multiline rows={2} value={t.body} onChange={(_, v) => setT({ body: v || '' })} />
-                </Item>
+                <TemplateCard key={t.id} name={t.name} summary={t.body} onDelete={() => upd({ whatsapp: { ...s.whatsapp, templates: s.whatsapp.templates.filter((_, j) => j !== i) } })}>
+                  <TextField label="Template name" value={t.name} onChange={(_, v) => setT({ name: v || '' })} />
+                  <TextField label="Message" multiline autoAdjustHeight rows={3} value={t.body} onChange={(_, v) => setT({ body: v || '' })} />
+                  {s.whatsapp.mode === 'cloud' && (
+                    <>
+                      <Text variant="small" className="crm-muted" block>For the WhatsApp Business number, Meta must approve each template first. Enter it exactly as approved:</Text>
+                      <Stack horizontal wrap tokens={{ childrenGap: 8 }}>
+                        <TextField label="Approved template name" value={t.cloudName || ''} onChange={(_, v) => setT({ cloudName: (v || '').trim() })} styles={{ root: { width: 220 } }} />
+                        <TextField label="Language" value={t.language || ''} placeholder="en" onChange={(_, v) => setT({ language: (v || '').trim() })} styles={{ root: { width: 90 } }} />
+                        <TextField label="Values for {{1}}, {{2}}…, in order" value={(t.params || []).join(', ')} placeholder="firstName, quoteNumber" onChange={(_, v) => setT({ params: (v || '').split(',').map(x => x.trim()).filter(Boolean) })} styles={{ root: { flex: 1, minWidth: 220 } }} />
+                      </Stack>
+                    </>
+                  )}
+                </TemplateCard>
               );
             })}
           </Group>
@@ -850,13 +1064,13 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
       key: 'marketing', group: 'Communication', title: 'Email marketing', icon: 'Megaphone', keywords: 'campaign unsubscribe consent opt-in newsletter',
       description: 'Campaign emails to consented leads and contacts.',
       render: () => (
-        <Group title="Campaign email" description="Campaigns › Send email sends one by one from your mailbox, with a personal unsubscribe link.">
-          <Row label="Unsubscribe link" help="HTTP URL of the flow “Unsubscribe”.">
-            <TextField ariaLabel="Unsubscribe link" placeholder="https://…" value={s.marketing.unsubscribeUrl} errorMessage={urlError(s.marketing.unsubscribeUrl)} onChange={(_, v) => upd({ marketing: { ...s.marketing, unsubscribeUrl: (v || '').trim() } })} />
+        <Group title="Campaign email" description="Send a campaign email from Campaigns › Send email. Each person gets their own copy from your mailbox, with a link to unsubscribe.">
+          <Row label="Unsubscribe link">
+            <FlowLink label="Unsubscribe link" flow="Unsubscribe" whatFor="Required before campaigns can be sent." value={s.marketing.unsubscribeUrl} onChange={v => upd({ marketing: { ...s.marketing, unsubscribeUrl: v } })} onShowFlows={() => go('flows')} />
           </Row>
           <Row label="Footer" help="Company name and postal address (required by anti-spam laws)."><TextField ariaLabel="Marketing footer" multiline rows={2} value={s.marketing.footer} onChange={(_, v) => upd({ marketing: { ...s.marketing, footer: v || '' } })} /></Row>
-          {toggleRow('Leads need explicit opt-in', 'Otherwise only contacts need marketing consent.', s.marketing.requireLeadOptIn, v => upd({ marketing: { ...s.marketing, requireLeadOptIn: v } }))}
-          <Row label="Pause between emails" help="Outlook allows about 30 emails a minute per mailbox."><Unit after="seconds"><TextField ariaLabel="Seconds between emails" type="number" value={String(s.marketing.secondsBetweenEmails)} styles={{ root: { width: 170 } }} onChange={(_, v) => upd({ marketing: { ...s.marketing, secondsBetweenEmails: Math.max(1, Number(v) || 2) } })} /></Unit></Row>
+          {toggleRow('Only email leads who opted in', 'Recommended in the EU and UK. Contacts always need marketing consent.', s.marketing.requireLeadOptIn, v => upd({ marketing: { ...s.marketing, requireLeadOptIn: v } }))}
+          <Row label="Wait between emails" help="Outlook allows about 30 emails a minute from one mailbox."><Unit after="seconds"><TextField ariaLabel="Seconds between emails" type="number" value={String(s.marketing.secondsBetweenEmails)} styles={{ root: { width: 170 } }} onChange={(_, v) => upd({ marketing: { ...s.marketing, secondsBetweenEmails: Math.max(1, Number(v) || 2) } })} /></Unit></Row>
         </Group>
       )
     },
@@ -865,8 +1079,8 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
       description: 'Channel notifications, the default CRM site and the Teams app.',
       render: () => (
         <>
-          <Group title="Channel notifications" description="Posts deals won, new leads, demo requests and cases to a Teams channel.">
-            <Row label="Workflows webhook URL" help='Teams: channel › ⋯ › Workflows › "Post to a channel when a webhook request is received".'>
+          <Group title="Channel notifications" description="Post won deals, new leads, demo requests and new cases to a Teams channel, so the whole team sees them.">
+            <Row label="Channel link" help={<>In Teams, open the channel › <b>⋯</b> › <b>Workflows</b> › “Post to a channel when a webhook request is received” › copy the link it shows.</>}>
               <Stack horizontal tokens={{ childrenGap: 8 }}>
                 <TextField ariaLabel="Teams webhook URL" styles={{ root: { flex: 1 } }} value={s.integrations.teamsWebhookUrl} disabled={!engine.hasFeature('webhooks')} onChange={(_, v) => upd({ integrations: { ...s.integrations, teamsWebhookUrl: v || '' } })} />
                 <DefaultButton text="Test" disabled={!s.integrations.teamsWebhookUrl} onClick={() => engine.webhooks.test(s.integrations.teamsWebhookUrl).then(() => notify('Test sent.', MessageBarType.success)).catch(e => notify(errorText(e), MessageBarType.error))} />
@@ -880,15 +1094,17 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
     // ============================================================ Integrations
     {
       key: 'flows', group: 'Integrations', title: 'Power Automate', icon: 'Flow', keywords: 'power automate flows solution download import',
-      description: 'The ready-made flow pack, pre-filled for this site.',
+      description: 'Background automations: reminders, alerts, portal, payments and more.',
       render: () => (
         <>
-          <Group title="Flow pack" description="One importable solution with every flow. Import it in Power Automate › Solutions › Import solution, then turn on the flows you need.">
-            <Row label="Download" help="Pre-filled with this site, page and your email.">
+          <Group title="Flow pack" description="Power Automate flows run CRM tasks in the background: reminders, alerts, the customer portal, payments and more. Download them all as one file, import it, and turn on only the flows you need.">
+            <Row label="1. Download" help="Already set up for this site.">
               <PrimaryButton iconProps={{ iconName: 'Download' }} text="Download Power Automate solution" onClick={() => setFlowDialog(true)} />
             </Row>
+            <Row label="2. Import" help="Power Automate › Solutions › Import solution › choose the downloaded file."><Link href="https://make.powerautomate.com/solutions" target="_blank">Open Power Automate</Link></Row>
+            <Row label="3. Turn on" help="Open each flow you need and turn it on. Some give you a link to paste into these settings."><Text className="crm-muted">See the list below.</Text></Row>
           </Group>
-          <Group title={`Included flows (${FLOWS.length})`} description="Premium = needs Power Automate Premium for the connection owner.">
+          <Group title={`Included flows (${FLOWS.length})`} description="“Premium” flows need a Power Automate Premium licence for the person who owns them.">
             {FLOWS.map(([name, what, premium]) => (
               <div key={name} className="crm-set-check">
                 <Icon iconName="Flow" className="crm-muted" />
@@ -907,49 +1123,53 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
     },
     {
       key: 'webhooks', group: 'Integrations', title: 'Webhooks', icon: 'PlugConnected', keywords: 'webhook zapier make n8n api events',
-      description: 'Send CRM events to Power Automate, Zapier, Make, n8n or your API.',
+      description: 'Notify other systems when something happens in the CRM.',
       render: () => (
-        <Group title="Outgoing webhooks" description={'Each event is POSTed as JSON (text/plain; in Power Automate use json(triggerBody())). Payload: { event, occurredAt, tenant, summary, data }.'}
+        <Group title="Webhooks" description="Notify another system (Zapier, Make, n8n, Power Automate or your own app) the moment something happens in the CRM, for example when a deal is won."
           action={<DefaultButton iconProps={{ iconName: 'Add' }} text="Add webhook" disabled={!engine.hasFeature('webhooks')} onClick={() => upd({ webhooks: [...s.webhooks, { id: uid(), name: 'New webhook', url: '', events: ['opportunity.won'], active: true }] })} />}>
           {!engine.hasFeature('webhooks') && <MessageBar messageBarType={MessageBarType.warning} styles={{ root: { margin: '10px 0' } }}>Webhooks require the Enterprise plan.</MessageBar>}
-          {s.webhooks.length === 0 && <Text className="crm-muted" block styles={{ root: { padding: '10px 0' } }}>No webhooks yet.</Text>}
+          {s.webhooks.length === 0 && <EmptyNote icon="PlugConnected" title="No webhooks yet" text="Most companies don't need these. Use them to connect the CRM to tools that are not in the flow pack." />}
           {s.webhooks.map(h => (
             <Item key={h.id}>
               <Stack horizontal wrap tokens={{ childrenGap: 8 }} verticalAlign="end">
                 <TextField label="Name" value={h.name} onChange={(_, v) => setHook(h.id, { name: v || '' })} styles={{ root: { width: 180 } }} />
-                <TextField label="URL (https)" value={h.url} onChange={(_, v) => setHook(h.id, { url: v || '' })} styles={{ root: { flex: 1, minWidth: 260 } }} />
+                <TextField label="Address (https://…)" value={h.url} onChange={(_, v) => setHook(h.id, { url: v || '' })} styles={{ root: { flex: 1, minWidth: 260 } }} />
                 <Toggle label="Active" checked={h.active} onChange={(_, c) => setHook(h.id, { active: !!c })} />
                 <DefaultButton text="Test" onClick={() => engine.webhooks.test(h.url).then(() => notify('Test sent.', MessageBarType.success)).catch(e => notify(errorText(e), MessageBarType.error))} />
                 <IconButton iconProps={{ iconName: 'Delete' }} ariaLabel="Delete webhook" onClick={() => upd({ webhooks: s.webhooks.filter(x => x.id !== h.id) })} />
               </Stack>
-              <Dropdown label="Events" multiSelect selectedKeys={h.events} options={[{ key: '*', text: 'All events' }, ...WEBHOOK_EVENTS.map(e => ({ key: e, text: e }))]}
+              <Dropdown label="Send when" multiSelect selectedKeys={h.events} options={[{ key: '*', text: 'All events' }, ...WEBHOOK_EVENTS.map(e => ({ key: e, text: e }))]}
                 onChange={(_, o) => o && setHook(h.id, { events: o.selected ? [...h.events, String(o.key)] : h.events.filter(x => x !== o.key) })} />
             </Item>
           ))}
+          <Disclosure label="For developers: message format">
+            <Text variant="small" block>Each event is sent as an HTTP POST with a JSON body <code>{'{ event, occurredAt, tenant, summary, data }'}</code> and content type text/plain. In Power Automate read it with <code>json(triggerBody())</code>.</Text>
+          </Disclosure>
         </Group>
       )
     },
     {
       key: 'connect', group: 'Integrations', title: 'AppSource & Power BI', icon: 'BarChartVertical', keywords: 'appsource partner center leads power bi reporting',
-      description: 'Marketplace leads and Power BI reporting.',
+      description: 'Leads from Microsoft AppSource, and your own Power BI reports.',
       render: () => (
         <>
-          <Group title="Microsoft AppSource / Partner Center leads">
-            <Text block styles={{ root: { padding: '10px 0' } }}>
-              Partner Center › your offer › Customer leads › <b>HTTPS endpoint</b> › paste the HTTP URL of the flow <b>AppSource lead intake</b> › Validate.
-              New marketplace leads then arrive in <b>{engine.def('leads').listTitle}</b>, are scored and routed automatically.
-            </Text>
+          <Group title="Leads from Microsoft AppSource" description="If you sell on Microsoft AppSource or Azure Marketplace, people who try or contact you there can become CRM leads automatically.">
+            <ol className="crm-ul">
+              <li>In Power Automate, turn on the flow <b>AppSource lead intake</b> and copy the link from its first step.</li>
+              <li>In Partner Center, open your offer › <b>Customer leads</b> › choose <b>HTTPS endpoint</b>, paste the link and click <b>Validate</b>.</li>
+              <li>New marketplace leads then appear under Leads, scored and assigned like any other lead.</li>
+            </ol>
           </Group>
-          <Group title="Power BI" description="Data stays protected by SharePoint permissions.">
-            <Row label="CRM site" help="Power BI Desktop › Get data › SharePoint Online list › implementation 2.0 › select the CRM lists.">
+          <Group title="Power BI reports" description="Build your own reports on CRM data in Power BI. People only see the records they are allowed to see.">
+            <Row label="CRM site address" help="In Power BI Desktop: Get data › SharePoint Online list › paste this address › choose the CRM lists.">
               <Stack horizontal tokens={{ childrenGap: 8 }} verticalAlign="center">
                 <Text styles={{ root: { wordBreak: 'break-all', flex: 1 } }}><code>{engine.ds.rest.webUrl}</code></Text>
                 <DefaultButton iconProps={{ iconName: 'Copy' }} text="Copy" onClick={() => { (navigator.clipboard ? navigator.clipboard.writeText(engine.ds.rest.webUrl) : Promise.reject(new Error('no clipboard'))).then(() => notify('Site URL copied.')).catch(() => window.prompt('Site URL', engine.ds.rest.webUrl)); }} />
               </Stack>
             </Row>
-            <Row label="Relationships" help="Set these in the Power BI model.">
-              <Text variant="small">AccountRef, ContactRef, OpportunityRef, QuoteRef, SubscriptionRef → ID of the matching list. Activities: RelatedType + RelatedId.</Text>
-            </Row>
+            <Disclosure label="For report builders: how the lists are linked">
+              <Text variant="small" block>AccountRef, ContactRef, OpportunityRef, QuoteRef and SubscriptionRef hold the ID of the matching record. Activities use RelatedType and RelatedId.</Text>
+            </Disclosure>
           </Group>
         </>
       )
@@ -957,7 +1177,7 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
     // ============================================================ Data & security
     {
       key: 'security', group: 'Data & security', title: 'Roles & permissions', icon: 'Lock', keywords: 'roles groups permissions record level security item sharepoint',
-      description: 'CRM roles, SharePoint groups and record-level security.',
+      description: 'Who can see and change what.',
       render: () => (
         <>
           <Group title="Roles" description={`Your role: ${engine.role}. Site owners are always administrators.`}>
@@ -969,7 +1189,7 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
               <li><b>Readers</b> – read-only.</li>
             </ul>
           </Group>
-          <Group title="SharePoint groups" description="Group names used for each role. Then add people in Site permissions › Groups."
+          <Group title="Who has which role" description="Each role is a SharePoint group. Click the button to create the groups, then add people to them in Site permissions › Groups."
             action={<PrimaryButton text="Create groups & apply list permissions" disabled={busy || !engine.hasFeature('security')} onClick={() => save(async () => { await engine.ds.applySecurity(setProgress); })} />}>
             {(['admins', 'managers', 'sales', 'support', 'readers'] as const).map(k => (
               <Row key={k} label={{ admins: 'Administrators', managers: 'Sales managers', sales: 'Sales', support: 'Support', readers: 'Readers' }[k]}>
@@ -980,8 +1200,8 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
               {!engine.hasFeature('security') ? 'Requires the Enterprise plan. ' : ''}<Link href={`${engine.ds.rest.webUrl}/_layouts/15/groups.aspx`} target="_blank">Open Site permissions › Groups</Link>. Existing site permissions are kept.
             </Text>
           </Group>
-          <Group title="Record-level security" description="Each lead, account, contact, deal, quote, case, subscription and invoice gets its own SharePoint permissions: owner, owner's team manager, team members (as set below) and the CRM groups. Reps no longer reach other reps' records anywhere in Microsoft 365.">
-            {toggleRow('Enforce record-level security', 'For records others create, turn on the flow “Record security” (runs every 15 minutes).', s.security.itemLevel, v => upd({ security: { ...s.security, itemLevel: v } }), !engine.hasFeature('security'))}
+          <Group title="Record-level security" description="Salespeople only see their own records (and, if you allow it, their team's), not only in the CRM but everywhere in Microsoft 365, including search and Copilot. Managers and administrators still see everything.">
+            {toggleRow('Protect each record', 'Also turn on the flow “Record security”, which protects records created outside the CRM every 15 minutes.', s.security.itemLevel, v => upd({ security: { ...s.security, itemLevel: v } }), !engine.hasFeature('security'))}
             <Row label="Team members">
               <Dropdown ariaLabel="Team access" selectedKey={s.security.teamAccess} options={[{ key: 'none', text: 'No access to each other' }, { key: 'read', text: "Can read each other's records" }, { key: 'edit', text: "Can edit each other's records" }]}
                 onChange={(_, o) => upd({ security: { ...s.security, teamAccess: (o?.key as 'none' | 'read' | 'edit') || 'read' } })} />
@@ -993,7 +1213,7 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
                   setProgress(`${settings.security.itemLevel ? 'Secured' : 'Reset'} ${r.secured} record(s); ${r.skipped} already up to date.`);
                 })} />
             </Row>
-            {toggleRow('Reps only see their own records in the CRM', 'A screen filter only. Use record-level security for real protection.', s.restrictRepsToOwnRecords, v => upd({ restrictRepsToOwnRecords: v }))}
+            {toggleRow('Hide other people\'s records in the CRM screens', 'Only hides them from view. For real protection, use “Protect each record” above.', s.restrictRepsToOwnRecords, v => upd({ restrictRepsToOwnRecords: v }))}
           </Group>
         </>
       )
@@ -1015,16 +1235,16 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
               ]} />
             </Row>
             {cf.type === 'choice' && <Row label="Choices" help="One per line."><TextField ariaLabel="Choices" multiline rows={4} value={lines(cf.choices || [])} onChange={(_, v) => setCf({ ...cf, choices: parseLines(v || '') })} /></Row>}
-            <Row label="Show in grids"><Checkbox ariaLabel="Show as a grid column" checked={!!cf.grid} onChange={(_, c) => setCf({ ...cf, grid: !!c })} /></Row>
+            <Row label="Show as a column in lists"><Checkbox ariaLabel="Show as a grid column" checked={!!cf.grid} onChange={(_, c) => setCf({ ...cf, grid: !!c })} /></Row>
             <Row label=""><DefaultButton iconProps={{ iconName: 'Add' }} text="Add field" disabled={!cf.label || !engine.hasFeature('customFields')} onClick={addCustom} /></Row>
           </Group>
           <Group title={`Your fields (${s.customFields.length})`} description="Removing a field hides it; the SharePoint column and its data are kept."
             action={<PrimaryButton text="Save & create columns" disabled={busy} onClick={() => save(() => engine.ds.provision(setProgress))} />}>
-            {s.customFields.length === 0 && <Text className="crm-muted" block styles={{ root: { padding: '10px 0' } }}>None yet.</Text>}
+            {s.customFields.length === 0 && <EmptyNote icon="FieldNotChanged" title="No custom fields yet" text="Add a field above, then click “Save & create columns”." />}
             {s.customFields.map(c => (
               <div key={`${c.entity}-${c.key}`} className="crm-set-check">
                 <Icon iconName="FieldNotChanged" className="crm-muted" />
-                <Text style={{ flex: 1 }}><b>{c.label}</b> <span className="crm-muted">· {engine.def(c.entity).singular} · {c.type} · column cf{c.key}</span></Text>
+                <Text style={{ flex: 1 }}><b>{c.label}</b> <span className="crm-muted">· {engine.def(c.entity).singular} · {c.type}</span></Text>
                 <IconButton iconProps={{ iconName: 'Delete' }} ariaLabel={`Remove ${c.label}`} onClick={() => upd({ customFields: s.customFields.filter(x => !(x.entity === c.entity && x.key === c.key)) })} />
               </div>
             ))}
@@ -1088,7 +1308,7 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
         <div className="crm-set-head">
           <span className="crm-set-icon"><Icon iconName={current.icon} /></span>
           <div>
-            {current.group && <Text variant="small" className="crm-muted" block>{current.group}</Text>}
+            <Text variant="small" className="crm-muted" block>Settings{current.group ? ` › ${current.group}` : ''}</Text>
             <Text as="h2" styles={{ root: { fontSize: 22, fontWeight: 600, margin: 0 } }}>{current.title}</Text>
             <Text className="crm-muted" block>{current.description}</Text>
           </div>

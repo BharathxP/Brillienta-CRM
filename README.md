@@ -2,6 +2,15 @@
 
 A complete CRM delivered as one SharePoint Framework (SPFx 1.24) web part. All data is stored in SharePoint lists **in the customer's own Microsoft 365 tenant**. There is no external database or server.
 
+## What's new in 3.4
+
+* **Brillienta Helpdesk integration** (Settings › Service › Brillienta Helpdesk): connect the Helpdesk site and test the connection.
+  * Accounts, contacts and cases get a **Support tickets** tab: an account shows the tickets of all its contacts (matched by email), a contact their own; open first, resolved and closed on request; each ticket opens in Helpdesk.
+  * **New ticket** from an account, contact or case. The ticket is handed to Helpdesk the same way as Microsoft 365 Copilot tickets: the next Helpdesk page an agent opens numbers, routes and notifies it and starts the SLA. CRM tags (CRM, crm-acc-, crm-con-, crm-case-) link it back to the record, also for customers outside the organisation.
+  * Dashboard: **Helpdesk tickets** widget (customers' open tickets, with the account) and KPI tile.
+  * Permissions: Helpdesk agents see every ticket; other users only tickets they raised.
+* **Settings, easier to use:** plain-language labels and help everywhere; pick lists, holidays, countries and email domains as tags; lead scoring as a points table per rating, source and job title; flow links show *Connected / Not connected* with step-by-step “How do I get this link?”; email and WhatsApp templates collapse to one line and have clickable placeholders; time zone picker and time fields for business hours; friendly empty states; technical details (PowerShell, webhook format, Power BI relationships, admin consent) moved into collapsible notes.
+
 ## What's new in 3.3
 
 * **Dashboard redesign:** a compact, modern home page. A coloured header holds the greeting, the *Ask your CRM* box and the AI briefing; below it are KPI tiles with 12-month trend lines and a grid of widgets with fixed heights that scroll inside, so the default layout fits on about one screen.

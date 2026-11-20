@@ -18,6 +18,7 @@ import { waRecipient } from '../../services/WhatsApp';
 import { QuoteLines, printQuote } from './QuoteLines';
 import { SmartSummary } from './SmartSummary';
 import { KbSuggestions } from './KbSuggestions';
+import { HelpdeskTickets } from './HelpdeskTickets';
 import { draftFollowUp, INSIGHT_ENTITIES } from '../../services/Insights';
 import { errorText, firstResponseLate, fmtDate, fmtMoney, slaBreached, sum } from '../utils';
 
@@ -467,6 +468,11 @@ export const RecordPanel: React.FC<IProps> = ({ entity, record, onClose, canGoBa
             <div style={{ paddingTop: 12 }}>
               <QuoteLines items={(draft.lineItems || []) as ILineItem[]} disabled={!canEdit} onChange={items => set('lineItems', items)} priceBook={draft.priceBook} currencyCode={draft.currency} />
             </div>
+          </PivotItem>
+        )}
+        {!isNew && engine.helpdesk.configured && ['accounts', 'contacts', 'cases'].indexOf(entity) >= 0 && (
+          <PivotItem itemKey="helpdesk" headerText="Support tickets" itemIcon="Headset">
+            <HelpdeskTickets entity={entity} record={draft} />
           </PivotItem>
         )}
         {!isNew && related.map(rel => {

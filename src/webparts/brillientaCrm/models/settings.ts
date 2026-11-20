@@ -152,6 +152,8 @@ export interface ICrmSettings {
   sequences: ISequence[];
   currencies: ICurrencyRate[];
   enrichment: { autoNewLeads: boolean };
+  /** Brillienta Helpdesk on this tenant: show customers' tickets in the CRM and raise tickets from it. */
+  helpdesk: { enabled: boolean; siteUrl: string; listPrefix: string; pageUrl: string };
   teams: ITeam[];
   priceBooks: IPriceBook[];
   service: { surveyUrl: string; surveyOnResolve: boolean; portalUrl: string };
@@ -245,6 +247,7 @@ export function defaultSettings(): ICrmSettings {
     marketing: { unsubscribeUrl: '', footer: '', requireLeadOptIn: true, secondsBetweenEmails: 2 },
     currencies: [],
     enrichment: { autoNewLeads: true },
+    helpdesk: { enabled: false, siteUrl: '', listPrefix: 'HD_', pageUrl: '' },
     teams: [],
     priceBooks: [],
     sequences: [
@@ -310,6 +313,7 @@ export function mergeSettings(saved: Partial<ICrmSettings> | undefined): ICrmSet
   out.service = { ...d.service, ...(saved.service || {}) };
   out.security = { ...d.security, ...(saved.security || {}) };
   out.enrichment = { ...d.enrichment, ...(saved.enrichment || {}) };
+  out.helpdesk = { ...d.helpdesk, ...(saved.helpdesk || {}) };
   out.marketing = { ...d.marketing, ...(saved.marketing || {}) };
   out.invoice = { ...d.invoice, ...(saved.invoice || {}) };
   out.renewals = { ...d.renewals, ...(saved.renewals || {}) };

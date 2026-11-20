@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { DataService, Role } from './DataService';
+import { Helpdesk } from './Helpdesk';
 import { GraphService, WebhookService } from './Integrations';
 import { CrmData, ENTITIES, EntityKey, IEntityDef, IRecord, IUserRef, LOST, SECURED_ENTITIES, WON } from '../models/model';
 import { ICrmSettings, IPriceBook as IPriceBookDef, ITeam as ITeamDef } from '../models/settings';
@@ -86,6 +87,7 @@ export class Engine {
   public role: Role = 'reader';
   public license!: ILicenseInfo;
   public readonly webhooks: WebhookService;
+  public readonly helpdesk: Helpdesk;
   private loading: Partial<Record<EntityKey, Promise<IRecord[]>>> = {};
 
   constructor(
@@ -94,6 +96,7 @@ export class Engine {
     tenantId: string,
     private readonly onData: (key: EntityKey, records: IRecord[]) => void
   ) {
+    this.helpdesk = new Helpdesk(this);
     this.webhooks = new WebhookService(
       () => (this.hasFeature('webhooks') ? this.settings.webhooks : []),
       () => (this.hasFeature('webhooks') ? this.settings.integrations.teamsWebhookUrl : ''),
