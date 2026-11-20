@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const VERSION = '2.0.1.0';
+const VERSION = '2.0.2.0';
 const SOLUTION = 'BrillientaCRMFlows';
 const PREFIX = 'bri';
 
@@ -270,7 +270,8 @@ Page: @{coalesce(${L('page')}, '')}   Landing page: @{coalesce(${L('landing_page
 flow('Brillienta CRM - New lead alert',
   'Emails the lead owner when a new lead arrives; unassigned leads go to the sales manager.',
   ['sp', 'outlook'], ['site', 'page', 'sales'],
-  { When_a_lead_is_created: spPoll('GetOnNewItems', 'leads') },
+  // Demo bookings from the website are announced by "Website leads and demo bookings" already.
+  { When_a_lead_is_created: spPoll('GetOnNewItems', 'leads', ["@not(equals(triggerOutputs()?['body/LeadSource/Value'], 'Website Demo Form'))"]) },
   {
     Lead_summary: {
       runAfter: {}, type: 'Compose',
