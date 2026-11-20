@@ -2,6 +2,17 @@
 
 A complete CRM delivered as one SharePoint Framework (SPFx 1.24) web part. All data is stored in SharePoint lists **in the customer's own Microsoft 365 tenant**. There is no external database or server.
 
+## What's new in 3.2
+
+* **Redesigned dashboard:** greeting with the quarter and days left, then a briefing, an AI forecast, the KPIs, and three sections: Focus, Performance and Your day. The chosen scope (company, team or my records) is remembered.
+* **AI on the dashboard** (computed in the browser from the records the user can see; nothing is sent anywhere):
+  * *Today's briefing*: the quarter outlook against quota, deals at risk and the main reason, lead flow compared with the same point last quarter, leads waiting for a first contact, the best converting source, SLA breaches, overdue invoices and renewals.
+  * *Deal health*: every open deal gets a win likelihood (0–100) from its stage, activity, close date, quotes and e-signature, contact, next steps, deal age and the company's own win history. Hover the badge to see the reasons.
+  * *AI forecast*: won so far, commit, forecast (deals × win likelihood) and best case for the quarter, with the quota and today marked. The revenue chart shows a projection for the next three months.
+  * *Next best actions*: a ranked to-do list across leads, deals, quotes, cases, invoices, renewals and tasks, with a one-click follow-up email draft.
+  * *Ask your CRM*: questions in plain language, such as "deals closing this month over 5k", "hot leads from LinkedIn", "overdue invoices", "will we hit quota this quarter?" or "win rate by source". The answer lists the matching records.
+  * *Ask Copilot*: copies a summary of the dashboard (forecast, signals and largest deals) as a prompt and opens Microsoft 365 Copilot for a deeper analysis.
+
 ## What's new in 3.0
 
 * **Multi-currency and price books:** each deal, quote, invoice and subscription has its own currency, while dashboards, forecasts, reports and grid totals convert to the company currency (Settings › Company › Currencies). Price books (for example "Partners EUR") set a quote's currency and prices, with specific prices per product or a discount on the converted list price.

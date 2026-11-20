@@ -6,6 +6,8 @@ export interface IDatum {
   hint?: string;
   /** Short axis label (full label is shown in the tooltip). */
   short?: string;
+  /** Drawn as a projection (hatched), and left out of the peak caption. */
+  projected?: boolean;
 }
 
 /** Categorical order (validated palette) – assigned in fixed order, never cycled. */
@@ -31,7 +33,7 @@ export const ColumnChart: React.FC<{ data: IDatum[]; format?: (n: number) => str
     const [tip, show, hide, ref] = useTip();
     const max = Math.max(1, ...data.map(d => d.value));
     const w = 100 / Math.max(1, data.length);
-    const peak = data.reduce((best, d, i) => (d.value > data[best].value ? i : best), 0);
+    const peak = data.reduce((best, d, i) => (!d.projected && d.value > data[best].value ? i : best), 0);
     return (
       <div className="viz" ref={ref} style={{ position: 'relative' }}>
         <svg width="100%" height={height + 22} role="img" aria-label={ariaLabel} preserveAspectRatio="none" viewBox={`0 0 100 ${height + 22}`}>
@@ -45,7 +47,7 @@ export const ColumnChart: React.FC<{ data: IDatum[]; format?: (n: number) => str
             return (
               <g key={d.label} onMouseMove={e => show(e, `${d.label}: ${format(d.value)}`)} onMouseLeave={hide}>
                 <rect x={i * w} y={0} width={w} height={height} fill="transparent" />
-                {d.value > 0 && <rect x={i * w + (w - bw) / 2} y={height - h} width={bw} height={h} rx={0.6} className="viz-bar" />}
+                {d.value > 0 && <rect x={i * w + (w - bw) / 2} y={height - h} width={bw} height={h} rx={0.6} className={d.projected ? 'viz-bar viz-bar-proj' : 'viz-bar'} />}
               </g>
             );
           })}
