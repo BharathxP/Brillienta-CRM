@@ -88,6 +88,13 @@ export interface ICustomField {
   grid?: boolean;
 }
 
+export type WidgetSize = 's' | 'm' | 'l' | 'xl';
+/** Dashboard layout: the KPI tiles and widgets shown, in order. */
+export interface IDashboardLayout {
+  kpis: string[];
+  widgets: { id: string; size: WidgetSize }[];
+}
+
 export interface IQuota {
   user: IUserRef;
   quarterly: number;
@@ -168,6 +175,8 @@ export interface ICrmSettings {
   groups: { admins: string; managers: string; sales: string; support: string; readers: string };
   /** SharePoint item-level permissions: reps only reach their own (and optionally their team's) records. */
   security: { itemLevel: boolean; teamAccess: 'none' | 'read' | 'edit' };
+  /** Company default dashboard layout set by an admin (users can still customise their own). */
+  dashboard?: IDashboardLayout;
 }
 
 export const WEBHOOK_EVENTS = [

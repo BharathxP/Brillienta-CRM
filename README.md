@@ -2,16 +2,18 @@
 
 A complete CRM delivered as one SharePoint Framework (SPFx 1.24) web part. All data is stored in SharePoint lists **in the customer's own Microsoft 365 tenant**. There is no external database or server.
 
-## What's new in 3.2
+## What's new in 3.3
 
-* **Redesigned dashboard:** greeting with the quarter and days left, then a briefing, an AI forecast, the KPIs, and three sections: Focus, Performance and Your day. The chosen scope (company, team or my records) is remembered.
-* **AI on the dashboard** (computed in the browser from the records the user can see; nothing is sent anywhere):
-  * *Today's briefing*: the quarter outlook against quota, deals at risk and the main reason, lead flow compared with the same point last quarter, leads waiting for a first contact, the best converting source, SLA breaches, overdue invoices and renewals.
-  * *Deal health*: every open deal gets a win likelihood (0–100) from its stage, activity, close date, quotes and e-signature, contact, next steps, deal age and the company's own win history. Hover the badge to see the reasons.
-  * *AI forecast*: won so far, commit, forecast (deals × win likelihood) and best case for the quarter, with the quota and today marked. The revenue chart shows a projection for the next three months.
-  * *Next best actions*: a ranked to-do list across leads, deals, quotes, cases, invoices, renewals and tasks, with a one-click follow-up email draft.
-  * *Ask your CRM*: questions in plain language, such as "deals closing this month over 5k", "hot leads from LinkedIn", "overdue invoices", "will we hit quota this quarter?" or "win rate by source". The answer lists the matching records.
-  * *Ask Copilot*: copies a summary of the dashboard (forecast, signals and largest deals) as a prompt and opens Microsoft 365 Copilot for a deeper analysis.
+* **Dashboard redesign:** a compact, modern home page. A coloured header holds the greeting, the *Ask your CRM* box and the AI briefing; below it are KPI tiles with 12-month trend lines and a grid of widgets with fixed heights that scroll inside, so the default layout fits on about one screen.
+* **Customisable:** *Customise* lets each user add, remove and reorder widgets and KPI tiles (drag and drop, or the ⋯ menu), and choose each widget's width (⅓, ½, ⅔ or full). The layout is saved per user; *Reset* goes back to the default, and admins can *Save as company default* for everyone.
+* **Widgets:** Next best actions, AI forecast, Revenue won with AI projection, Pipeline by stage, Deals at risk, Hottest leads, My open tasks, Biggest open deals, Conversion funnel, Leads by source, Upcoming demos and Open support cases. **KPIs:** Won this quarter, Open pipeline, New leads, Win rate, Average deal, Sales cycle, Demos to schedule, MRR, Unpaid invoices and Open cases.
+* **AI** (computed in the browser from the records the user can see; nothing is sent anywhere):
+  * *AI briefing*: quarter outlook against quota, deals at risk and the main reason, lead flow against the same point last quarter, leads waiting for first contact, best converting source, SLA breaches, overdue invoices and renewals.
+  * *Deal health*: each open deal gets a win likelihood (0–100) from its stage, activity, close date, quotes and e-signature, contact, next steps, age and the company's own win history; hover the badge for the reasons.
+  * *AI forecast*: won, commit, forecast (deals × win likelihood) and best case for the quarter against quota.
+  * *Next best actions*: a ranked to-do list across leads, deals, quotes, cases, invoices, renewals and tasks, with a one-click email draft.
+  * *Ask your CRM*: plain-language questions such as "deals closing this month over 5k", "hot leads from LinkedIn" or "will we hit quota this quarter?".
+  * *Ask Copilot*: copies a summary of the dashboard as a prompt and opens Microsoft 365 Copilot.
 
 ## What's new in 3.0
 
