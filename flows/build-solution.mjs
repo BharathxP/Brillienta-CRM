@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const VERSION = '2.0.0.0';
+const VERSION = '2.0.1.0';
 const SOLUTION = 'BrillientaCRMFlows';
 const PREFIX = 'bri';
 
@@ -163,7 +163,7 @@ flow('Brillienta CRM - Website leads and demo bookings',
         Full_name: { runAfter: {}, type: 'Compose', inputs: `@trim(coalesce(${L('name')}, ''))` },
         First_name: { runAfter: { Full_name: ['Succeeded'] }, type: 'Compose', inputs: "@first(split(outputs('Full_name'), ' '))" },
         Last_name: { runAfter: { First_name: ['Succeeded'] }, type: 'Compose', inputs: "@if(contains(outputs('Full_name'), ' '), trim(substring(outputs('Full_name'), indexOf(outputs('Full_name'), ' '))), '')" },
-        Products: { runAfter: {}, type: 'Compose', inputs: `@join(union(coalesce(${L('products')}, createArray()), coalesce(${L('interests')}, createArray()), if(empty(coalesce(${L('product')}, '')), createArray(), createArray(${L('product')}))), ', ')` },
+        Products: { runAfter: {}, type: 'Compose', inputs: `@join(union(coalesce(${L('products')}, json('[]')), coalesce(${L('interests')}, json('[]')), if(empty(coalesce(${L('product')}, '')), json('[]'), createArray(${L('product')}))), ', ')` },
         Kind: { runAfter: {}, type: 'Compose', inputs: `@if(equals(${L('kind')}, 'demo'), 'demo', if(contains(${SUPPORT_TYPES}, coalesce(${L('request_type')}, '')), 'support', 'lead'))` },
         Details: {
           runAfter: { Products: ['Succeeded'], Kind: ['Succeeded'] }, type: 'Compose',
@@ -196,8 +196,8 @@ Page: @{coalesce(${L('page')}, '')}   Landing page: @{coalesce(${L('landing_page
               'item/Origin/Value': 'Web',
               // SLA deadlines are calculated by the CRM (business hours, first response) when support opens it.
               'item/RequesterEmail': `@{toLower(${L('email')})}`,
-              'item/ContactRef': "@first(coalesce(body('Find_contact')?['value'], createArray()))?['ID']",
-              'item/AccountRef': "@first(coalesce(body('Find_contact')?['value'], createArray()))?['AccountRef']",
+              'item/ContactRef': "@first(coalesce(body('Find_contact')?['value'], json('[]')))?['ID']",
+              'item/AccountRef': "@first(coalesce(body('Find_contact')?['value'], json('[]')))?['AccountRef']",
               'item/Description': `From: @{outputs('Full_name')} <@{${L('email')}}> · @{coalesce(${L('company')}, '')}\n\n@{outputs('Details')}`
             }, { Priority: ['Succeeded'] }),
             Alert_support: email(P('support'), `[@{${L('reference')}}] @{${L('request_type')}} (@{outputs('Priority')}): @{coalesce(${L('subject')}, outputs('Full_name'))}`,
@@ -665,8 +665,8 @@ flow('Brillienta CRM - Email to case',
                 'item/Priority/Value': `@{if(equals(toLower(coalesce(${M('importance')}, '')), 'high'), 'High', 'Normal')}`,
                 'item/CaseStatus/Value': 'New', 'item/Origin/Value': 'Email', 'item/Category/Value': 'Question',
                 'item/RequesterEmail': "@{outputs('Sender')}",
-                'item/ContactRef': "@first(coalesce(body('Find_contact')?['value'], createArray()))?['ID']",
-                'item/AccountRef': "@first(coalesce(body('Find_contact')?['value'], createArray()))?['AccountRef']",
+                'item/ContactRef': "@first(coalesce(body('Find_contact')?['value'], json('[]')))?['ID']",
+                'item/AccountRef': "@first(coalesce(body('Find_contact')?['value'], json('[]')))?['AccountRef']",
                 'item/Description': "From: @{outputs('Sender')}\n\n@{outputs('Email_text')}"
               }, { Find_contact: ['Succeeded', 'Failed'] }),
               Case_number: { runAfter: { Create_case: ['Succeeded'] }, type: 'Compose', inputs: `@{concat(${P('casePrefix').slice(1)}, '-', formatDateTime(utcNow(), 'yyyy'), '-', formatNumber(body('Create_case')?['ID'], '0000'))}` },
@@ -717,7 +717,7 @@ ${errorExpr}
 <label class="chk"><input type="checkbox" name="agree" value="yes" required> I have authority to accept this quote and agree to its terms. Typing my name above is my electronic signature.</label>
 <div class="btns"><button class="ok" type="submit" name="decision" value="accept">Accept and sign</button><button class="no" type="submit" name="decision" value="decline" formnovalidate>Decline</button></div>
 </form>`);
-const formField = (key) => ({ type: 'Query', inputs: { from: "@coalesce(triggerBody()?['$formdata'], createArray())", where: `@equals(item()?['key'], '${key}')` } });
+const formField = (key) => ({ type: 'Query', inputs: { from: "@coalesce(triggerBody()?['$formdata'], json('[]'))", where: `@equals(item()?['key'], '${key}')` } });
 const fv = (key) => `trim(string(coalesce(first(body('Form_${key}'))?['value'], '')))`;
 const ipExpr = "@{take(coalesce(triggerOutputs()?['headers']?['X-Forwarded-For'], triggerOutputs()?['headers']?['x-forwarded-for'], triggerOutputs()?['headers']?['X-Real-IP'], ''), 255)}";
 const uaExpr = "coalesce(triggerOutputs()?['headers']?['User-Agent'], triggerOutputs()?['headers']?['user-agent'], '')";
@@ -892,11 +892,11 @@ flow('Brillienta CRM - WhatsApp inbound',
             runAfter: {}, type: 'If', expression: { and: [{ equals: [`@coalesce(${V}?['metadata']?['phone_number_id'], '')`, P('waPhoneId')] }] },
             actions: {
               For_each_message: {
-                runAfter: {}, type: 'Foreach', foreach: `@coalesce(${V}?['messages'], createArray())`,
+                runAfter: {}, type: 'Foreach', foreach: `@coalesce(${V}?['messages'], json('[]'))`,
                 actions: {
                   Sender: { runAfter: {}, type: 'Compose', inputs: "@{replace(coalesce(items('For_each_message')?['from'], ''), '''', '')}" },
                   Text: { runAfter: {}, type: 'Compose', inputs: "@{coalesce(items('For_each_message')?['text']?['body'], items('For_each_message')?['button']?['text'], items('For_each_message')?['interactive']?['button_reply']?['title'], items('For_each_message')?['interactive']?['list_reply']?['title'], items('For_each_message')?['image']?['caption'], items('For_each_message')?['document']?['filename'], concat('[', items('For_each_message')?['type'], ' message]'))}" },
-                  Profile_name: { runAfter: {}, type: 'Compose', inputs: `@{coalesce(first(coalesce(${V}?['contacts'], createArray()))?['profile']?['name'], '')}` },
+                  Profile_name: { runAfter: {}, type: 'Compose', inputs: `@{coalesce(first(coalesce(${V}?['contacts'], json('[]')))?['profile']?['name'], '')}` },
                   Find_contact: getItems('contacts', "Whatsapp eq '@{outputs('Sender')}'", { Sender: ['Succeeded'] }, 1),
                   Find_lead: getItems('leads', "Whatsapp eq '@{outputs('Sender')}'", { Sender: ['Succeeded'] }, 1),
                   Target: {
@@ -938,7 +938,7 @@ flow('Brillienta CRM - WhatsApp inbound',
                 }
               },
               For_each_status: {
-                runAfter: { For_each_message: ['Succeeded', 'Failed'] }, type: 'Foreach', foreach: `@coalesce(${V}?['statuses'], createArray())`,
+                runAfter: { For_each_message: ['Succeeded', 'Failed'] }, type: 'Foreach', foreach: `@coalesce(${V}?['statuses'], json('[]'))`,
                 actions: {
                   Find_sent: getItems('acts', "ExternalId eq 'wa:@{replace(items('For_each_status')?['id'], '''', '')}'", {}, 1),
                   For_the_activity: {
@@ -1097,7 +1097,7 @@ flow('Brillienta CRM - Inbound API',
               },
               else: { actions: {} }
             },
-            Found: { runAfter: { Needs_lookup: ['Succeeded'] }, type: 'Compose', inputs: "@first(coalesce(body('Find')?['value'], createArray()))" },
+            Found: { runAfter: { Needs_lookup: ['Succeeded'] }, type: 'Compose', inputs: "@first(coalesce(body('Find')?['value'], json('[]')))" },
             Route: {
               runAfter: { Found: ['Succeeded'] }, type: 'If', expression: { and: [{ equals: ["@outputs('Action')", 'get'] }] },
               actions: {
@@ -1167,7 +1167,7 @@ flow('Brillienta CRM - Record security',
           actions: {
             Changed_items: spHttp('GET', "_api/web/lists/getbytitle('@{items('For_each_list')?['list']}')/items?$select=Id,SecuredOwner,@{items('For_each_list')?['owner']}Id&$filter=Modified ge datetime'@{addMinutes(utcNow(), -40)}'&$top=1000"),
             For_each_item: {
-              runAfter: { Changed_items: ['Succeeded'] }, type: 'Foreach', foreach: "@coalesce(body('Changed_items')?['value'], createArray())",
+              runAfter: { Changed_items: ['Succeeded'] }, type: 'Foreach', foreach: "@coalesce(body('Changed_items')?['value'], json('[]'))",
               runtimeConfiguration: { concurrency: { repetitions: 4 } },
               actions: {
                 Needs_securing: {
@@ -1182,7 +1182,7 @@ flow('Brillienta CRM - Record security',
                     Grant_owner: addRole(OWNER, "body('Role_contribute')?['Id']", { Grant_readers: ['Succeeded', 'Failed'] }),
                     Owner_teams: {
                       runAfter: { Grant_owner: ['Succeeded'] }, type: 'Query',
-                      inputs: { from: `@coalesce(${S('teams')}, createArray())`, where: `@contains(string(item()), concat('"id":', string(${OWNER}), ','))` }
+                      inputs: { from: `@coalesce(${S('teams')}, json('[]'))`, where: `@contains(string(item()), concat('"id":', string(${OWNER}), ','))` }
                     },
                     For_each_team: {
                       runAfter: { Owner_teams: ['Succeeded'] }, type: 'Foreach', foreach: "@body('Owner_teams')", runtimeConfiguration: { concurrency: { repetitions: 1 } },
@@ -1196,7 +1196,7 @@ flow('Brillienta CRM - Record security',
                           runAfter: { Has_manager: ['Succeeded', 'Failed'] }, type: 'If', expression: { and: [{ not: { equals: [`@coalesce(${S('security')}?['teamAccess'], 'read')`, 'none'] } }] },
                           actions: {
                             For_each_member: {
-                              runAfter: {}, type: 'Foreach', foreach: "@coalesce(items('For_each_team')?['members'], createArray())", runtimeConfiguration: { concurrency: { repetitions: 1 } },
+                              runAfter: {}, type: 'Foreach', foreach: "@coalesce(items('For_each_team')?['members'], json('[]'))", runtimeConfiguration: { concurrency: { repetitions: 1 } },
                               actions: {
                                 Grant_member: addRole("items('For_each_member')?['id']", `if(equals(${S('security')}?['teamAccess'], 'edit'), body('Role_contribute')?['Id'], body('Role_read')?['Id'])`, {})
                               }
@@ -1263,7 +1263,7 @@ const Q_ = (k) => `triggerOutputs()?['queries']?['${k}']`;
 const PORTAL = Pi('portalUrl');
 const link = (pg, extra = '') => `${PORTAL}&p=${pg}&s=@{outputs('Token')}${extra}`;
 const ME = "outputs('Session')";
-const pform = (key) => ({ type: 'Query', inputs: { from: "@coalesce(triggerBody()?['$formdata'], createArray())", where: `@equals(item()?['key'], '${key}')` } });
+const pform = (key) => ({ type: 'Query', inputs: { from: "@coalesce(triggerBody()?['$formdata'], json('[]'))", where: `@equals(item()?['key'], '${key}')` } });
 const pv = (key) => `trim(string(coalesce(first(body('F_${key}'))?['value'], '')))`;
 const nav = `<p class="m" style="margin-bottom:18px"><a href="${link('cases')}">My requests</a> · <a href="${link('new')}">New request</a> · <a href="${link('kb')}">Help articles</a> · <a href="${PORTAL}&p=login">Sign out</a></p>`;
 const redirect = (url, runAfter = {}) => ({ runAfter, type: 'Response', kind: 'Http', inputs: { statusCode: 303, headers: { Location: url, 'Cache-Control': 'no-store' } } });
@@ -1458,6 +1458,10 @@ function validate(f) {
   }
   for (const m of text.matchAll(/variables\('([^']+)'\)/g)) {
     if (!text.includes(`"name":"${m[1]}"`)) { errors.push(`unknown variable ${m[1]}`); }
+  }
+  // Functions Power Automate rejects without arguments (use json('[]') for an empty array).
+  for (const fn of ['createArray', 'concat', 'coalesce', 'union', 'intersection', 'first', 'last', 'join', 'split']) {
+    if (text.includes(`${fn}()`)) { errors.push(`${fn}() needs arguments`); }
   }
   // balanced parentheses inside every @{...} / @expr
   const strings = [];
