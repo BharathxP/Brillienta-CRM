@@ -1,6 +1,6 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/spfx/client-side-component-manifest.schema.json",
-  "id": "b23dbe84-b8f5-4357-9fdf-a13385cb7dcd",
+  "id": "a8232344-4bc9-4155-9bac-e323e41e1fc5",
   "alias": "CrmRenewalsCopilotComponent",
   "componentType": "CopilotComponent",
   "copilotType": "Ux",

@@ -1,0 +1,21 @@
+{
+  "$schema": "../../node_modules/@microsoft/spfx-heft-plugins/lib-commonjs/plugins/copilotAgentPlugin/copilot-agent.schema.json",
+  "agents": [
+    {
+      "name": {
+        "default": "Brillienta CRM Copilot"
+      },
+      "description": {
+        "default": "Pipeline, account summaries, renewals, overdue invoices, SLA-risk cases and new leads from Brillienta CRM, rendered in Microsoft 365 Copilot."
+      },
+      "components": [
+        "4b89c2fd-9f9b-4d9a-bdf3-b8f13506eb52",
+        "3159f4b8-3a20-405f-8af3-242d9f097cd2",
+        "a8232344-4bc9-4155-9bac-e323e41e1fc5",
+        "6f5494f5-fbce-41ba-9d47-315a7c1619e7",
+        "8d340bd0-f8ed-42b7-b4b8-ddf1c09381e6",
+        "6eb5a8ba-3292-4024-9d65-b77695dbc243"
+      ]
+    }
+  ]
+}

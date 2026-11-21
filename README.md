@@ -4,7 +4,7 @@ A complete CRM delivered as one SharePoint Framework (SPFx 1.24) web part. All d
 
 ## What's new in 3.5
 
-* **Brillienta CRM in Microsoft 365 Copilot** (SPFx 1.24 Copilot Components). The `.sppkg` now also contains a Copilot agent, **Brillienta CRM**, whose six tools render live CRM data as interactive cards in the Copilot chat:
+* **Brillienta CRM in Microsoft 365 Copilot** (SPFx 1.24 Copilot Components). A second SharePoint package, **`brillienta-crm-copilot.sppkg`**, adds a Copilot agent, **Brillienta CRM**, whose six tools render live CRM data as interactive cards in the Copilot chat:
 
   | Tool | Example prompt | Shows |
   |---|---|---|
@@ -104,7 +104,7 @@ Upgrading from 2.0: deploy the new `.sppkg`, open the CRM as an administrator an
 | **Outlook email** | Send from the user's mailbox via Microsoft Graph (`Mail.Send`), with templates and placeholders; automatically logged to the record |
 | **Outlook sync** | Per-user opt-in (My work › Turn on). Every 15 minutes while the CRM is open, it reads the user's inbox, sent items and calendar (`Mail.Read`, `Calendars.ReadWrite`) and logs conversations and meetings with known contacts and leads on their timelines, with a link back to Outlook. Internal mail is never logged, and items are de-duplicated |
 | **WhatsApp Business** | **Click to chat** (free; opens WhatsApp with the message and a template filled in) or the **WhatsApp Business Cloud API** through Power Automate, which sends approved templates and free text and receives replies, with delivery and read status. Unknown numbers become WhatsApp leads. Everything is logged on the timeline |
-| **Microsoft 365 Copilot** | **Built-in agent** (3.5): six SPFx Copilot Components ship in the `.sppkg` and render live pipeline, account, renewal, invoice, case and new-lead cards in Copilot. See [Microsoft 365 Copilot](#microsoft-365-copilot). **Knowledge agent**: Settings › Integrations › **Download Copilot agent** builds a declarative agent (Teams manifest 1.19) grounded in the CRM site, for text answers across all lists. Upload it in the Teams admin center. Both need Microsoft 365 Copilot licences |
+| **Microsoft 365 Copilot** | **Copilot agent** (3.5): six SPFx Copilot Components ship in `brillienta-crm-copilot.sppkg` and render live pipeline, account, renewal, invoice, case and new-lead cards in Copilot. See [Microsoft 365 Copilot](#microsoft-365-copilot). **Knowledge agent**: Settings › Integrations › **Download Copilot agent** builds a declarative agent (Teams manifest 1.19) grounded in the CRM site, for text answers across all lists. Upload it in the Teams admin center. Both need Microsoft 365 Copilot licences |
 | **Inbound REST API** | Power Automate flow *Inbound API*: `POST {entity, action: create/upsert/get, match: {field, value}, fields}` with an `x-api-key` header, for ERPs, billing systems, Zapier or Make |
 | **Power BI** | Settings › Integrations › Power BI: connect Power BI Desktop to the CRM lists (SharePoint Online list 2.0), with the relationships documented. Data stays protected by SharePoint permissions |
 | **Payments** | Razorpay and Stripe payment links and payment webhooks through Power Automate. API keys never reach the browser |
@@ -156,8 +156,9 @@ src/copilotComponents/          Microsoft 365 Copilot tools (SPFx 1.24 Copilot C
   shared/CrmCopilotComponentBase.tsx  React root, Copilot theme, links, model context
   crmPipeline/ crmAccountSummary/ crmRenewals/ crmOverdueInvoices/ crmSlaRiskCases/ crmCreateLead/
                                 one folder per tool: manifest (tool name + description), parameter schema, view
-copilot/                        the Copilot agent: Teams manifest, declarative agent, instructions, plugin seed
-config/copilot-agent.json       which components the agent exposes (the build generates teams/brillienta-crm.zip)
+copilot-solution/               the second package, brillienta-crm-copilot.sppkg (built by build.mjs from the same src/)
+  config/                       its bundle, package-solution (own solution id) and copilot-agent.json
+  copilot/                      the agent: Teams manifest, declarative agent, instructions, plugin seed
 outlook-addin/                  Outlook add-in (manifest.xml + web/ task pane)
   components/core/              generic grid, record panel, fields, charts, dialogs, quote editor
   components/pages/             dashboard, my work, calendar, forecast, reports, settings, audit, setup
@@ -174,7 +175,8 @@ Requires Node 22 LTS.
 
 ```bash
 npm install
-npm run build        # → sharepoint/solution/brillienta-crm.sppkg
+npm run build        # → sharepoint/solution/brillienta-crm.sppkg and brillienta-crm-copilot.sppkg
+npm run build:copilot  # only the Copilot package
 npm start            # local dev server for the hosted workbench
 ```
 
@@ -189,7 +191,7 @@ npm start            # local dev server for the hosted workbench
 
 ## Microsoft 365 Copilot
 
-Version 3.5 ships a Copilot agent inside the `.sppkg` (SPFx 1.24 Copilot Components). There is no separate app to upload and no API key: the tools call SharePoint as the signed-in user.
+Version 3.5 adds a Copilot agent (SPFx 1.24 Copilot Components) in a second SharePoint package, `brillienta-crm-copilot.sppkg`. Both packages go through the App Catalog; there is nothing to upload in the Teams admin center and no API key: the tools call SharePoint as the signed-in user.
 
 **Requirements**
 
@@ -199,11 +201,13 @@ Version 3.5 ships a Copilot agent inside the `.sppkg` (SPFx 1.24 Copilot Compone
 
 **Install**
 
-1. Deploy `brillienta-crm.sppkg` to the App Catalog as usual. The package contains the six Copilot Components and the agent package (`ClientSideAssets/brillienta-crm.zip`).
+1. Deploy `brillienta-crm.sppkg` (the CRM) as usual, then upload and deploy `brillienta-crm-copilot.sppkg` (the six Copilot Components and the agent) and choose **Sync to Teams** for it.
 2. Make the agent available in the Microsoft 365 admin center (*Agents* / *Integrated apps*) if your tenant requires admin approval for agents.
 3. In Copilot, open the **Brillienta CRM** agent and try a conversation starter, such as "Show my open deals closing this quarter."
 
-**One Teams app for the CRM and the agent.** In SPFx 1.24, when a solution has both Copilot Components and a Teams-enabled web part, *Sync to Teams* publishes only the agent's Teams app ([sp-dev-docs#11041](https://github.com/SharePoint/sp-dev-docs/issues/11041)). So the agent's app (`copilot/manifest.json`) also carries the CRM's personal tab and channel tab: deploying the `.sppkg` and choosing **Sync to Teams** gives users the CRM app (left rail and channel tabs) and the Copilot agent in one app. Nothing else to upload. `toolSchemas.test.ts` checks that the tabs and the agent stay in that manifest.
+**Why two packages.** In SPFx 1.24, *Sync to Teams* publishes one Teams app per package, and when a package has both Copilot Components and a Teams-enabled web part it publishes only the agent, so the CRM app disappears from Teams ([sp-dev-docs#11041](https://github.com/SharePoint/sp-dev-docs/issues/11041)). With two packages, `brillienta-crm.sppkg` publishes the CRM Teams app (personal app and channel tab) and `brillienta-crm-copilot.sppkg` publishes the **Brillienta CRM Copilot** agent. Customers without Copilot simply skip the second package. When Microsoft supports both in one package, they can be merged again.
+
+**Updating the agent:** raise `version` in `copilot-solution/copilot/manifest.json` and in `copilot-solution/config/package-solution.json`, rebuild, deploy and Sync to Teams again.
 
 **How it behaves**
 
@@ -214,7 +218,7 @@ Version 3.5 ships a Copilot agent inside the `.sppkg` (SPFx 1.24 Copilot Compone
 
 **Change or add a tool**
 
-Tools live in `src/copilotComponents/<tool>/`. The tool name and the description Copilot uses to choose it are in the `*.manifest.json`, the parameters are in `*Properties.ts` (plain JSON Schema, portable plugin v2.4 subset, no imports), and the agent's routing rules are in `copilot/instruction.txt`. New components also need an entry in `config/config.json` (bundle `brillienta-crm-copilot`) and `config/copilot-agent.json`; `toolSchemas.test.ts` checks this. Microsoft recommends creating new components with `yo @microsoft/sharepoint --component-type copilotComponent`.
+Tools live in `src/copilotComponents/<tool>/`. The tool name and the description Copilot uses to choose it are in the `*.manifest.json`, the parameters are in `*Properties.ts` (plain JSON Schema, portable plugin v2.4 subset, no imports), and the agent's routing rules are in `copilot-solution/copilot/instruction.txt`. New components also need an entry in `copilot-solution/config/config.json` (bundle `brillienta-crm-copilot`) and `copilot-solution/config/copilot-agent.json`; `toolSchemas.test.ts` checks this. Microsoft recommends creating new components with `yo @microsoft/sharepoint --component-type copilotComponent`.
 
 **Not yet verified in a live tenant:** the tools are unit-tested and render-tested with sample data, and the package builds, but routing by Copilot, SharePoint calls from the Copilot host, and the Copilot iframe's content security policy have to be checked in a tenant where SPFx Copilot Components are enabled.
 
@@ -242,7 +246,7 @@ The CRM runs as a **Teams personal app** (left rail) and as a **channel tab**, a
    * otherwise SharePoint Search finds the `CRM Opportunities` list the person can read. Nothing to set up and no admin rights or PowerShell needed. A brand-new CRM site appears in search within minutes to a few hours.
 
    *Settings › Microsoft Teams › Main CRM site* shows whether search already finds the CRM. **Optional:** when a tenant has more than one CRM, a SharePoint admin can pin one for everyone with **Pin this site** (needs app catalog admin rights) or `Set-PnPStorageEntity -Key "BrillientaCRM.SiteUrl" -Value "https://contoso.sharepoint.com/sites/crm" -Scope Tenant`. A pinned site always wins.
-2. **Publish to Teams:** in the App Catalog, select *Brillienta CRM* › **Sync to Teams**. From 3.5 this one Teams app contains the CRM tabs and the Copilot agent (see [Microsoft 365 Copilot](#microsoft-365-copilot)). The `.sppkg` contains only this one Teams app (no `teams/TeamsSPFxApp.zip`), because two Teams apps for the same web part make Sync to Teams fail with "solution already exists".
+2. **Publish to Teams:** in the App Catalog, select *Brillienta CRM* › **Sync to Teams**. The solution includes a branded Teams app package (`teams/TeamsSPFxApp.zip`). The Copilot agent is a separate package with its own Sync to Teams (see [Microsoft 365 Copilot](#microsoft-365-copilot)).
 3. **Channel tab:** the tab settings show the **CRM site URL** field. Leave it empty to find the CRM automatically, or point the team at another site, such as a separate CRM for one team.
 
 In Teams, the CRM follows the Teams theme (light, dark or high contrast). It uses an app-style layout with fixed navigation. If pop-ups are blocked, quotes download as an HTML file instead of opening a print window. The CRM site URL can also be set per web part in SharePoint (*CRM data* in the property pane).

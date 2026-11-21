@@ -1,6 +1,5 @@
 // Builds the Microsoft Teams app package for Brillienta CRM.
-//  - From 3.5 the .sppkg no longer contains teams/TeamsSPFxApp.zip: the Copilot agent's Teams app (copilot/manifest.json)
-//    carries the CRM tabs too, and two Teams apps claiming the same web part make Sync to Teams fail.
+//  - teams/TeamsSPFxApp.zip  → included in the .sppkg; used by "Sync to Teams" in the App Catalog
 //  - dist/BrillientaCRM-Teams.zip → for manual upload in the Teams admin center
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
@@ -79,5 +78,5 @@ writeFileSync(join(OUT, 'pkg', 'manifest.json'), JSON.stringify(manifest, null, 
 copyFileSync(join(ROOT, 'teams', `${ID}_color.png`), join(OUT, 'pkg', 'color.png'));
 copyFileSync(join(ROOT, 'teams', `${ID}_outline.png`), join(OUT, 'pkg', 'outline.png'));
 execSync(`cd "${join(OUT, 'pkg')}" && zip -qX ../BrillientaCRM-Teams.zip manifest.json color.png outline.png`);
-rmSync(join(ROOT, 'teams', 'TeamsSPFxApp.zip'), { force: true });
-console.log(`Teams app ${manifest.name.short} v${version} (${pkg.name}) → teams-app/dist/BrillientaCRM-Teams.zip (tab-only, for tenants without Copilot)`);
+copyFileSync(join(OUT, 'BrillientaCRM-Teams.zip'), join(ROOT, 'teams', 'TeamsSPFxApp.zip'));
+console.log(`Teams app ${manifest.name.short} v${version} (${pkg.name}) → teams/TeamsSPFxApp.zip, teams-app/dist/BrillientaCRM-Teams.zip`);

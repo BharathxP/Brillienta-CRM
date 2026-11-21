@@ -1,0 +1,37 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.29/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.29",
+  "version": "1.0.0",
+  "id": "28c3151c-8e2a-4046-a01f-67544b604f58",
+  "developer": {
+    "name": "Brillienta",
+    "websiteUrl": "https://brillienta.com",
+    "privacyUrl": "https://brillienta.com/privacy",
+    "termsOfUseUrl": "https://brillienta.com/terms"
+  },
+  "name": {
+    "short": "Brillienta CRM Copilot",
+    "full": "Brillienta CRM for Microsoft 365 Copilot"
+  },
+  "description": {
+    "short": "Your pipeline, accounts, renewals, invoices, cases and new leads in Copilot.",
+    "full": "Brillienta CRM brings your CRM into Microsoft 365 Copilot. Ask for your pipeline with AI deal health, a 360 summary of any account, subscriptions renewing soon, overdue invoices or support cases at risk of breaching their SLA, and add new leads from a conversation. Data stays in your own SharePoint site and every answer uses your own CRM permissions."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#008D62",
+  "copilotAgents": {
+    "declarativeAgents": [
+      {
+        "id": "brillientaCrmCopilotAgent",
+        "file": "declarativeAgent.json"
+      }
+    ]
+  },
+  "permissions": [
+    "identity"
+  ],
+  "validDomains": []
+}

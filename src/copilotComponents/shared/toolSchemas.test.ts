@@ -72,25 +72,31 @@ describe('Copilot agent registration', () => {
   });
 
   it('registers every component with the agent and in the Copilot bundle', () => {
-    const agent = readJson('config/copilot-agent.json').agents[0];
+    const agent = readJson('copilot-solution/config/copilot-agent.json').agents[0];
     expect([...agent.components].sort()).toEqual(manifests.map(m => m.json.id).sort());
-    const bundle = readJson('config/config.json').bundles['brillienta-crm-copilot'].components.map((c: any) => c.manifest).sort();
+    const bundle = readJson('copilot-solution/config/config.json').bundles['brillienta-crm-copilot'].components.map((c: any) => c.manifest).sort();
     expect(bundle).toEqual(manifests.map(m => `./${m.file}`).sort());
   });
 
   it('names every tool in the agent instructions', () => {
-    const instructions = fs.readFileSync(path.join(ROOT, 'copilot', 'instruction.txt'), 'utf8');
+    const instructions = fs.readFileSync(path.join(ROOT, 'copilot-solution', 'copilot', 'instruction.txt'), 'utf8');
     manifests.forEach(m => expect(instructions).toContain(m.json.tools[0].name));
     expect(instructions.length).toBeLessThan(8000);
   });
 
-  it('ships one Teams app with the CRM tabs and the Copilot agent (Sync to Teams publishes only this app)', () => {
-    const app = readJson('copilot/manifest.json');
+  it('keeps the agent in its own package, separate from the CRM web part and its Teams app', () => {
+    // SPFx 1.24 Sync to Teams publishes one Teams app per package, and only the agent when both are in one package.
+    const crm = readJson('config/package-solution.json').solution;
+    const copilot = readJson('copilot-solution/config/package-solution.json').solution;
+    expect(copilot.id).not.toBe(crm.id);
+    expect(copilot.features[0].id).not.toBe(crm.features[0].id);
+    expect(Object.keys(readJson('config/config.json').bundles)).not.toContain('brillienta-crm-copilot');
+    const app = readJson('copilot-solution/copilot/manifest.json');
     const webPartId = (fs.readFileSync(path.join(ROOT, 'src/webparts/brillientaCrm/BrillientaCrmWebPart.manifest.json'), 'utf8').match(/"id"\s*:\s*"([0-9a-f-]{36})"/i) || [])[1];
     expect(webPartId).toBeTruthy();
+    expect(app.id).not.toBe(webPartId);
     expect(app.copilotAgents.declarativeAgents.length).toBe(1);
-    expect(app.staticTabs.some((t: any) => String(t.contentUrl || '').indexOf(`componentId=${webPartId}`) >= 0)).toBe(true);
-    expect(app.configurableTabs.some((t: any) => String(t.configurationUrl || '').indexOf(`componentId=${webPartId}`) >= 0)).toBe(true);
-    expect(app.webApplicationInfo.id).toBe('00000003-0000-0ff1-ce00-000000000000');
+    expect(app.staticTabs).toBeUndefined();
+    expect(app.configurableTabs).toBeUndefined();
   });
 });

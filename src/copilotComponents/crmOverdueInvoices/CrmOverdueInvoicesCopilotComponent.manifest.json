@@ -1,6 +1,6 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/spfx/client-side-component-manifest.schema.json",
-  "id": "1d9728bb-d278-4524-8c6b-3b5f488e8682",
+  "id": "6f5494f5-fbce-41ba-9d47-315a7c1619e7",
   "alias": "CrmOverdueInvoicesCopilotComponent",
   "componentType": "CopilotComponent",
   "copilotType": "Ux",

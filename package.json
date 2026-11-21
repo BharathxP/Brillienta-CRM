@@ -6,7 +6,8 @@
     "node": ">=22.14.0 <23.0.0 || >=24.0.0 <25.0.0 || >=26.0.0 <27.0.0"
   },
   "scripts": {
-    "build": "node teams-app/build-teams-app.mjs && node flows/build-solution.mjs && heft test --clean --production && heft package-solution --production",
+    "build": "node teams-app/build-teams-app.mjs && node flows/build-solution.mjs && heft test --clean --production && heft package-solution --production && npm run build:copilot",
+    "build:copilot": "node copilot-solution/build.mjs",
     "clean": "heft clean",
     "eject-webpack": "heft eject-webpack",
     "start": "heft start --clean",

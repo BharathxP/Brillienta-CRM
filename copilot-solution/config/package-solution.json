@@ -1,0 +1,44 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/spfx-build/package-solution.schema.json",
+  "solution": {
+    "name": "Brillienta CRM Copilot",
+    "id": "cae62943-18ff-4be2-9116-96c06a7fd7a9",
+    "version": "1.0.0.0",
+    "includeClientSideAssets": true,
+    "skipFeatureDeployment": true,
+    "isDomainIsolated": false,
+    "developer": {
+      "name": "Brillienta",
+      "websiteUrl": "https://brillienta.com",
+      "privacyUrl": "https://brillienta.com/privacy",
+      "termsOfUseUrl": "https://brillienta.com/terms",
+      "mpnId": "Undefined-1.24.1"
+    },
+    "metadata": {
+      "shortDescription": {
+        "default": "Brillienta CRM in Microsoft 365 Copilot: pipeline, accounts, renewals, invoices, cases and new leads."
+      },
+      "longDescription": {
+        "default": "Adds the Brillienta CRM agent to Microsoft 365 Copilot. Six tools show live CRM data as interactive cards: your pipeline with AI deal health, a 360 summary of any account, subscriptions renewing soon, overdue invoices, support cases at risk of breaching their SLA, and a reviewable new-lead form. Requires Brillienta CRM (brillienta-crm.sppkg) on a SharePoint site; every answer uses the signed-in person's own CRM permissions."
+      },
+      "screenshotPaths": [],
+      "videoUrl": "",
+      "categories": [
+        "CRM",
+        "Productivity"
+      ]
+    },
+    "features": [
+      {
+        "title": "Brillienta CRM Copilot",
+        "description": "Deploys the Brillienta CRM Copilot Components and agent.",
+        "id": "8b070239-429f-4348-b750-46820eb01e7b",
+        "version": "1.0.0.0"
+      }
+    ],
+    "iconPath": "images/AppIcon.png"
+  },
+  "paths": {
+    "zippedPackage": "solution/brillienta-crm-copilot.sppkg"
+  }
+}

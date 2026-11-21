@@ -1,6 +1,6 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/spfx/client-side-component-manifest.schema.json",
-  "id": "b80af107-127d-4bc9-9588-439b14282ac2",
+  "id": "4b89c2fd-9f9b-4d9a-bdf3-b8f13506eb52",
   "alias": "CrmPipelineCopilotComponent",
   "componentType": "CopilotComponent",
   "copilotType": "Ux",

@@ -1,6 +1,6 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/spfx/client-side-component-manifest.schema.json",
-  "id": "bf25a469-5133-4260-a96e-5adc1d144367",
+  "id": "8d340bd0-f8ed-42b7-b4b8-ddf1c09381e6",
   "alias": "CrmSlaRiskCasesCopilotComponent",
   "componentType": "CopilotComponent",
   "copilotType": "Ux",
