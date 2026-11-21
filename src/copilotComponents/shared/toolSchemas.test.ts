@@ -83,4 +83,14 @@ describe('Copilot agent registration', () => {
     manifests.forEach(m => expect(instructions).toContain(m.json.tools[0].name));
     expect(instructions.length).toBeLessThan(8000);
   });
+
+  it('ships one Teams app with the CRM tabs and the Copilot agent (Sync to Teams publishes only this app)', () => {
+    const app = readJson('copilot/manifest.json');
+    const webPartId = (fs.readFileSync(path.join(ROOT, 'src/webparts/brillientaCrm/BrillientaCrmWebPart.manifest.json'), 'utf8').match(/"id"\s*:\s*"([0-9a-f-]{36})"/i) || [])[1];
+    expect(webPartId).toBeTruthy();
+    expect(app.copilotAgents.declarativeAgents.length).toBe(1);
+    expect(app.staticTabs.some((t: any) => String(t.contentUrl || '').indexOf(`componentId=${webPartId}`) >= 0)).toBe(true);
+    expect(app.configurableTabs.some((t: any) => String(t.configurationUrl || '').indexOf(`componentId=${webPartId}`) >= 0)).toBe(true);
+    expect(app.webApplicationInfo.id).toBe('00000003-0000-0ff1-ce00-000000000000');
+  });
 });

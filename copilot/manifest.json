@@ -1,7 +1,7 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.29/MicrosoftTeams.schema.json",
   "manifestVersion": "1.29",
-  "version": "3.5.0",
+  "version": "3.5.1",
   "id": "9a9effed-6d70-440d-8978-48157bd4224d",
   "developer": {
     "name": "Brillienta",
@@ -9,19 +9,50 @@
     "privacyUrl": "https://brillienta.com/privacy",
     "termsOfUseUrl": "https://brillienta.com/terms"
   },
+  "name": {
+    "short": "Brillienta CRM",
+    "full": "Brillienta CRM for Microsoft Teams and Copilot"
+  },
+  "description": {
+    "short": "CRM in Teams and Copilot: leads, deals, quotes, cases, renewals and forecasts.",
+    "full": "Brillienta CRM is a complete CRM that runs inside Microsoft Teams, SharePoint and Microsoft 365 Copilot and keeps all data in your own Microsoft 365 tenant. Open the CRM as a personal app or a channel tab to work with leads, accounts, contacts, the drag-and-drop pipeline, branded quotes, demos, support cases with SLAs, dashboards and forecasts. In Copilot, ask for your pipeline with AI deal health, a 360 summary of any account, subscriptions renewing soon, overdue invoices or cases at risk of breaching their SLA, and add new leads from a conversation. Every answer uses your own CRM permissions."
+  },
   "icons": {
     "color": "color.png",
     "outline": "outline.png"
   },
-  "name": {
-    "short": "Brillienta CRM",
-    "full": "Brillienta CRM for Microsoft 365 Copilot"
-  },
-  "description": {
-    "short": "Your pipeline, accounts, renewals, invoices, cases and new leads in Copilot.",
-    "full": "Brillienta CRM brings your CRM into Microsoft 365 Copilot. Ask for your pipeline with AI deal health, a 360 summary of any account, subscriptions renewing soon, overdue invoices or support cases at risk of breaching their SLA, and add new leads from a conversation. Data stays in your own SharePoint site and every answer uses your own CRM permissions."
-  },
   "accentColor": "#008D62",
+  "staticTabs": [
+    {
+      "entityId": "brillienta-crm",
+      "name": "CRM",
+      "contentUrl": "https://{teamSiteDomain}/_layouts/15/TeamsLogon.aspx?SPFX=true&dest=/_layouts/15/teamshostedapp.aspx%3Fteams%26personal%26componentId=cd3cf6ef-6aa6-4518-bbfe-20ccba434112%26forceLocale={locale}",
+      "websiteUrl": "https://brillienta.com",
+      "scopes": [
+        "personal"
+      ]
+    },
+    {
+      "entityId": "about",
+      "scopes": [
+        "personal"
+      ]
+    }
+  ],
+  "configurableTabs": [
+    {
+      "configurationUrl": "https://{teamSiteDomain}{teamSitePath}/_layouts/15/TeamsLogon.aspx?SPFX=true&dest={teamSitePath}/_layouts/15/teamshostedapp.aspx%3FopenPropertyPane=true%26teams%26componentId=cd3cf6ef-6aa6-4518-bbfe-20ccba434112%26forceLocale={locale}",
+      "canUpdateConfiguration": true,
+      "scopes": [
+        "team"
+      ],
+      "context": [
+        "channelTab",
+        "privateChatTab",
+        "meetingChatTab"
+      ]
+    }
+  ],
   "copilotAgents": {
     "declarativeAgents": [
       {
@@ -33,5 +64,17 @@
   "permissions": [
     "identity"
   ],
-  "validDomains": []
+  "validDomains": [
+    "*.login.microsoftonline.com",
+    "*.sharepoint.com",
+    "*.sharepoint-df.com",
+    "spoppe-a.akamaihd.net",
+    "spoprod-a.akamaihd.net",
+    "resourceseng.blob.core.windows.net",
+    "msft.spoppe.com"
+  ],
+  "webApplicationInfo": {
+    "resource": "https://{teamSiteDomain}",
+    "id": "00000003-0000-0ff1-ce00-000000000000"
+  }
 }
