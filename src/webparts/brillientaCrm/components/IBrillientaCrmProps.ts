@@ -13,8 +13,10 @@ export interface IBrillientaCrmProps {
   /** Site the web part is running on (team site in Teams, root site for the personal app). */
   hostWebUrl: string;
   host: CrmHost;
-  /** Tenant-wide default CRM site (storage entity), if set. */
+  /** Main CRM site pinned by a SharePoint admin (tenant property), if any. Optional: the CRM is also found automatically. */
   tenantSiteUrl: string;
+  /** CRM site found automatically with SharePoint Search (Teams and other hosts, when nothing is pinned). */
+  foundSiteUrl?: string;
   tenantId: string;
   /** SharePoint UI culture, e.g. "de-DE" (default language). */
   culture?: string;

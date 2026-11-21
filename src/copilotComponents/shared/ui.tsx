@@ -44,7 +44,7 @@ export const ErrorBox: React.FC<{ error: unknown; onRetry?: () => void }> = ({ e
   const status = (error as { status?: number })?.status;
   const text = notConfigured ? (error as Error).message
     : status === 403 || status === 401 ? 'You do not have access to the Brillienta CRM site. Ask a CRM administrator to add you to a CRM group.'
-    : status === 404 ? 'The CRM lists were not found on the default CRM site. Open the CRM once as an administrator to set it up.'
+    : status === 404 ? 'The CRM lists were not found on the CRM site. Open the CRM once as an administrator to set it up.'
     : `Brillienta CRM could not be loaded: ${(error as Error)?.message || String(error)}`;
   return (
     <div>

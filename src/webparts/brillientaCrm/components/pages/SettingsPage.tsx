@@ -5,6 +5,7 @@ import {
   Link, Checkbox, Spinner, SpinnerSize, Label, Dialog, DialogType, DialogFooter, Icon, SearchBox
 } from '@fluentui/react';
 import { downloadFlowPack, IFlowPackInfo, loadFlowPack } from '../../services/FlowPackage';
+import { TENANT_SITE_KEY, crmSearchQuery, parseCrmSearch } from '../../services/CrmSiteLocator';
 import { ENTITIES, EntityKey, FieldType } from '../../models/model';
 import { ICrmSettings, ICustomField, IStageDef, IWebhook, WEBHOOK_EVENTS } from '../../models/settings';
 import { useCrm, useEntities } from '../CrmContext';
@@ -13,7 +14,6 @@ import { errorText, lsGet, lsSet, uid } from '../utils';
 
 const lines = (a: string[]): string => a.join('\n');
 const parseLines = (s: string): string[] => s.split('\n').map(x => x.trim()).filter((x, i, arr) => x && arr.indexOf(x) === i);
-const TENANT_SITE_KEY = 'BrillientaCRM.SiteUrl';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -431,26 +431,47 @@ const CopilotGroup: React.FC = () => {
 
 const TeamsGroups: React.FC<{ host: string; tenantSiteUrl: string }> = ({ host, tenantSiteUrl }) => {
   const { engine, notify } = useCrm();
-  const here = engine.ds.rest.webUrl;
-  const [current, setCurrent] = React.useState<string>(tenantSiteUrl);
+  const here = engine.ds.rest.webUrl.replace(/\/$/, '');
+  const [pinned, setPinned] = React.useState<string>(tenantSiteUrl);
+  const [found, setFound] = React.useState<string[] | undefined>(undefined);
   const [busy, setBusy] = React.useState(false);
-  React.useEffect(() => { engine.ds.getTenantCrmSite(TENANT_SITE_KEY).then(v => setCurrent(v)).catch(() => undefined); }, []);
-  const isDefault = !!current && current.replace(/\/$/, '').toLowerCase() === here.replace(/\/$/, '').toLowerCase();
-  const setDefault = (): void => {
+  React.useEffect(() => {
+    engine.ds.getTenantCrmSite(TENANT_SITE_KEY).then(v => setPinned(v.replace(/\/$/, ''))).catch(() => undefined);
+    // The same search Teams and Copilot use to find the CRM (signed-in person's permissions, no admin rights).
+    const q = encodeURIComponent(crmSearchQuery().replace(/'/g, "''"));
+    engine.ds.rest.get(`/_api/search/query?querytext='${q}'&selectproperties='Path,SPWebUrl,LastModifiedTime'&rowlimit=20&trimduplicates=false`)
+      .then(r => setFound(parseCrmSearch(r).map(h => h.webUrl)))
+      .catch(() => setFound([]));
+  }, []);
+  const same = (a: string, b: string): boolean => a.replace(/\/$/, '').toLowerCase() === b.replace(/\/$/, '').toLowerCase();
+  const isPinned = !!pinned && same(pinned, here);
+  const foundHere = !!found && found.some(u => same(u, here));
+  const otherCrms = (found || []).filter(u => !same(u, here));
+  const pin = (): void => {
     setBusy(true);
-    engine.ds.setTenantCrmSite(TENANT_SITE_KEY, here).then(() => { setBusy(false); setCurrent(here); notify('This site is now the default CRM for Teams and other sites.', MessageBarType.success); })
-      .catch(e => { setBusy(false); notify(`${errorText(e)} — requires admin rights on the tenant app catalog. Alternative: Set-PnPStorageEntity -Key "${TENANT_SITE_KEY}" -Value "${here}" -Scope Tenant`, MessageBarType.error); });
+    engine.ds.setTenantCrmSite(TENANT_SITE_KEY, here).then(() => { setBusy(false); setPinned(here); notify('This site is now pinned as the main CRM.', MessageBarType.success); })
+      .catch(() => { setBusy(false); notify('Only a SharePoint admin can pin the main CRM site. You do not need to: Teams and Copilot already find this CRM automatically.', MessageBarType.warning); });
   };
+  const how = pinned
+    ? (isPinned ? 'Pinned to this site by a SharePoint admin.' : `Pinned by a SharePoint admin to another site: ${pinned}`)
+    : found === undefined ? 'Checking…'
+    : foundHere ? 'Automatically, with SharePoint search. Nothing to set up.'
+    : 'Automatically, with SharePoint search. This site is not in search yet: new CRM sites usually appear within minutes to a few hours.';
   return (
     <>
-      <Group title="Main CRM site" description="When people open the CRM in Teams or on another SharePoint site, it shows the data from this main site, so everyone works in the same CRM.">
-        <Row label="Current default" help={isDefault ? 'This site.' : current ? 'Another site is the default.' : 'Not set yet.'}>
-          <Text styles={{ root: { wordBreak: 'break-all' } }}>{current || '—'}</Text>
+      <Group title="Main CRM site" description="When people open the CRM in Teams, in Microsoft 365 Copilot or on another SharePoint site, it finds this CRM by itself, so everyone works in the same CRM. No PowerShell or admin rights are needed.">
+        <Row label="How Teams and Copilot find this CRM" help={how}>
+          <Text styles={{ root: { wordBreak: 'break-all' } }}>{pinned ? 'Pinned' : foundHere ? 'Automatic ✓' : found === undefined ? '…' : 'Automatic (waiting for search)'}</Text>
         </Row>
-        <Row label="Use this site as the main CRM" help={host !== 'sharepoint' ? 'Open the CRM in SharePoint to change this.' : 'Needs a SharePoint admin (tenant app catalog).'}>
-          <PrimaryButton text={isDefault ? 'This site is the default' : 'Use this site'} disabled={busy || isDefault || host !== 'sharepoint'} onClick={setDefault} />
+        {otherCrms.length > 0 && !pinned && (
+          <Row label="Other CRM sites" help="Search also finds these CRM sites. People who can open more than one CRM see the one changed most recently. A SharePoint admin can pin this site to choose it for everyone.">
+            <Text styles={{ root: { wordBreak: 'break-all' } }}>{otherCrms.join(', ')}</Text>
+          </Row>
+        )}
+        <Row label="Pin this site (optional)" help={host !== 'sharepoint' ? 'Open the CRM in SharePoint to change this.' : 'Only needed when your tenant has more than one CRM. Needs a SharePoint admin.'}>
+          <DefaultButton text={isPinned ? 'This site is pinned' : 'Pin this site'} disabled={busy || isPinned || host !== 'sharepoint'} onClick={pin} />
         </Row>
-        <Disclosure label="For admins: set it with PowerShell">
+        <Disclosure label="For SharePoint admins: pin with PowerShell (optional)">
           <Text variant="small" block><code>Set-PnPStorageEntity -Key &quot;{TENANT_SITE_KEY}&quot; -Value &quot;{here}&quot; -Scope Tenant</code></Text>
         </Disclosure>
       </Group>
@@ -1076,7 +1097,7 @@ export const SettingsPage: React.FC<{ tenantId: string; host: string; tenantSite
     },
     {
       key: 'teams', group: 'Communication', title: 'Microsoft Teams', icon: 'TeamsLogo', keywords: 'teams channel notifications webhook default site personal app',
-      description: 'Channel notifications, the default CRM site and the Teams app.',
+      description: 'Channel notifications, how Teams and Copilot find this CRM, and the Teams app.',
       render: () => (
         <>
           <Group title="Channel notifications" description="Post won deals, new leads, demo requests and new cases to a Teams channel, so the whole team sees them.">

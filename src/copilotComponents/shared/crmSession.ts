@@ -1,20 +1,18 @@
 // Opens a Brillienta CRM session inside a Microsoft 365 Copilot host.
 //
-// The Copilot host does not run on the CRM site, so the CRM site is found the same way the Teams
-// personal app finds it: from the tenant storage entity set in Settings › Microsoft Teams › Main CRM site
-// ("Use this site"). All reads and writes then go through the same DataService and
-// Engine as the web part, as the signed-in user, so SharePoint permissions, record-level security,
-// "reps see only their own records", licensing, lead scoring, assignment and the audit log all
-// behave exactly as they do in the CRM itself.
+// The Copilot host does not run on the CRM site, so the CRM site is found the same way as in the Teams personal app:
+// the main CRM site if a SharePoint admin pinned one, otherwise SharePoint Search finds the CRM lists the signed-in
+// person can read (no admin rights or PowerShell needed; see CrmSiteLocator). All reads and writes then go through
+// the same DataService and Engine as the web part, as the signed-in user, so SharePoint permissions, record-level
+// security, "reps see only their own records", licensing, lead scoring, assignment and the audit log all behave
+// exactly as they do in the CRM itself.
 import { SPHttpClient } from '@microsoft/sp-http';
 import { DataService } from '../../webparts/brillientaCrm/services/DataService';
 import { Engine } from '../../webparts/brillientaCrm/services/Engine';
 import { GraphService } from '../../webparts/brillientaCrm/services/Integrations';
 import { evaluateLicense } from '../../webparts/brillientaCrm/models/license';
 import { EntityKey } from '../../webparts/brillientaCrm/models/model';
-
-/** Same key as the web part and Settings › Microsoft Teams. */
-export const TENANT_SITE_KEY = 'BrillientaCRM.SiteUrl';
+import { locateCrmSite } from '../../webparts/brillientaCrm/services/CrmSiteLocator';
 
 /** The parts of the SPFx context the session needs (kept small so tests can fake it). */
 export interface ICrmHostContext {
@@ -35,28 +33,18 @@ export interface ICrmSession {
 
 export class CrmNotConfiguredError extends Error {
   public constructor() {
-    super('No main CRM site is set for this tenant yet. A CRM administrator can open Brillienta CRM on the CRM site and choose Settings › Microsoft Teams › Main CRM site › "Use this site".');
+    super('No Brillienta CRM was found for your account. Ask a CRM administrator to give you access to the CRM site. If the CRM was set up in the last few minutes, try again shortly: Copilot finds it through SharePoint search.');
     this.name = 'CrmNotConfiguredError';
   }
 }
 
 const trimSlash = (u: string): string => u.replace(/\/+$/, '');
 
-/** Reads the tenant-wide CRM site URL. Storage entities are tenant scoped, so any site can read them. */
+/** The CRM site for the signed-in person: pinned main CRM site, else the CRM lists SharePoint Search finds. */
 export async function resolveCrmSiteUrl(ctx: ICrmHostContext): Promise<string> {
-  const host = trimSlash(ctx.pageContext.web.absoluteUrl);
-  try {
-    const res = await ctx.spHttpClient.get(`${host}/_api/web/GetStorageEntity('${TENANT_SITE_KEY}')`, SPHttpClient.configurations.v1,
-      { headers: { Accept: 'application/json;odata=nometadata', 'odata-version': '' } });
-    if (res.ok) {
-      const j = await res.json();
-      const v = trimSlash(String(j?.Value || '').trim());
-      if (v) { return v; }
-    }
-  } catch {
-    /* fall through */
-  }
-  throw new CrmNotConfiguredError();
+  const found = await locateCrmSite(ctx.spHttpClient, trimSlash(ctx.pageContext.web.absoluteUrl));
+  if (!found) { throw new CrmNotConfiguredError(); }
+  return found.url;
 }
 
 async function openSession(ctx: ICrmHostContext): Promise<ICrmSession> {

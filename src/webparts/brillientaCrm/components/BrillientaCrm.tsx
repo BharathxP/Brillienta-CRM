@@ -309,8 +309,8 @@ const BrillientaCrm: React.FC<IBrillientaCrmProps> = props => {
         {inTeams && (
           <MessageBar messageBarType={MessageBarType.info} isMultiline styles={{ root: { maxWidth: 900, margin: '16px auto 0' } }}>
             <b>Running in Microsoft Teams.</b> {props.host === 'teamsTab'
-              ? <>This tab is connected to the team’s site ({props.webUrl}). To use your company CRM instead, open the tab’s <b>Settings</b> and enter the CRM site URL — or ask an admin to set the default CRM site in <i>CRM › Settings › Microsoft Teams</i>. You can also set up a separate CRM for this team below.</>
-              : <>The personal app needs the default CRM site. An admin sets it once in <i>CRM › Settings › Microsoft Teams</i> on the CRM site (currently checking {props.webUrl}).</>}
+              ? <>No CRM was found for you, so this tab is connected to the team’s site ({props.webUrl}). The CRM is found automatically on any site you can open: ask a CRM administrator to give you access to the CRM site (new CRM sites can take a few minutes to appear in search). You can also enter the CRM site URL in the tab’s <b>Settings</b>, or set up a separate CRM for this team below.</>
+              : <>No CRM was found for you. The personal app finds the CRM automatically on any site you can open, so ask a CRM administrator to give you access to the CRM site. If the CRM was set up in the last few minutes, try again shortly: it is found through SharePoint search.</>}
           </MessageBar>
         )}
         <SetupPage ds={engine.ds} statuses={statuses} canProvision={engine.role === 'admin' && props.host !== 'teamsPersonal'} onDone={() => { init().catch(() => undefined); }} logo={props.isDarkTheme ? LOGO_DARK : LOGO_LIGHT} />

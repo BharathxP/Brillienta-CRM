@@ -8,12 +8,12 @@ import { BaseClientSideWebPart } from '@microsoft/sp-webpart-base';
 import { IReadonlyTheme, ThemeProvider, ThemeChangedEventArgs } from '@microsoft/sp-component-base';
 import { SPPermission } from '@microsoft/sp-page-context';
 import { initializeIcons, createTheme, PartialTheme } from '@fluentui/react';
-import { SPHttpClient } from '@microsoft/sp-http';
 
 import * as strings from 'BrillientaCrmWebPartStrings';
 import BrillientaCrm from './components/BrillientaCrm';
 import { CrmHost, CrmMode, IBrillientaCrmProps } from './components/IBrillientaCrmProps';
 import { ENTITIES, ListKey, SYSTEM_LISTS } from './models/model';
+import { TENANT_SITE_KEY, locateCrmSite, readPinnedCrmSite } from './services/CrmSiteLocator';
 
 export interface IBrillientaCrmWebPartProps {
   mode: CrmMode;
@@ -37,7 +37,7 @@ export interface IBrillientaCrmWebPartProps {
 
 let iconsInitialized = false;
 
-export const TENANT_SITE_KEY = 'BrillientaCRM.SiteUrl';
+export { TENANT_SITE_KEY };
 
 /** Brillienta-branded themes for Microsoft Teams (default / dark / high contrast). */
 function teamsTheme(kind: string): PartialTheme {
@@ -83,6 +83,8 @@ export default class BrillientaCrmWebPart extends BaseClientSideWebPart<IBrillie
   private _host: CrmHost = 'sharepoint';
   private _teamsTheme: string | undefined;
   private _tenantSiteUrl: string = '';
+  /** CRM site found with SharePoint Search (Teams and other hosts only). */
+  private _foundSiteUrl: string = '';
 
   protected async onInit(): Promise<void> {
     await super.onInit();
@@ -108,23 +110,26 @@ export default class BrillientaCrmWebPart extends BaseClientSideWebPart<IBrillie
         this._teamsTheme = 'default';
       }
     }
-    // Tenant-wide default CRM site (lets the Teams personal app and other sites use one CRM)
+    // Where the CRM lists are. On a SharePoint page: this site, unless a SharePoint admin pinned a main CRM site.
+    // In Teams, Outlook and the Microsoft 365 app the page runs on the team's or the root site, so the CRM is found
+    // automatically (pinned site, else this site if it has the lists, else SharePoint Search). No admin rights needed.
+    const hostWeb = this.context.pageContext.web.absoluteUrl;
     try {
-      const res = await this.context.spHttpClient.get(
-        `${this.context.pageContext.web.absoluteUrl}/_api/web/GetStorageEntity('${TENANT_SITE_KEY}')`,
-        SPHttpClient.configurations.v1, { headers: { Accept: 'application/json;odata=nometadata', 'odata-version': '' } });
-      if (res.ok) {
-        const j = await res.json();
-        this._tenantSiteUrl = String(j?.Value || '').replace(/\/$/, '');
+      if (this._host === 'sharepoint') {
+        this._tenantSiteUrl = await readPinnedCrmSite(this.context.spHttpClient, hostWeb);
+      } else {
+        const found = await locateCrmSite(this.context.spHttpClient, hostWeb);
+        this._tenantSiteUrl = found?.source === 'pinned' ? found.url : '';
+        this._foundSiteUrl = found?.source === 'search' ? found.url : '';
       }
     } catch {
-      /* storage entity not available */
+      /* not available: fall back to this site */
     }
   }
 
   private get crmWebUrl(): string {
     const own = (this.properties.crmSiteUrl || '').trim().replace(/\/$/, '');
-    return own || this._tenantSiteUrl || this.context.pageContext.web.absoluteUrl;
+    return own || this._tenantSiteUrl || this._foundSiteUrl || this.context.pageContext.web.absoluteUrl;
   }
 
   private get listNames(): Partial<Record<ListKey, string>> {
@@ -152,6 +157,7 @@ export default class BrillientaCrmWebPart extends BaseClientSideWebPart<IBrillie
       hostWebUrl: ctx.pageContext.web.absoluteUrl,
       host: this._host,
       tenantSiteUrl: this._tenantSiteUrl,
+      foundSiteUrl: this._foundSiteUrl,
       tenantId: ctx.pageContext.aadInfo?.tenantId?.toString() || '',
       culture: ctx.pageContext.cultureInfo?.currentUICultureName,
       isSiteAdmin: sameSite && (!!ctx.pageContext.legacyPageContext?.isSiteAdmin || ctx.pageContext.web.permissions.hasPermission(SPPermission.manageWeb)),
@@ -244,7 +250,7 @@ export default class BrillientaCrmWebPart extends BaseClientSideWebPart<IBrillie
             groupFields: [
               PropertyPaneTextField('crmSiteUrl', {
                 label: strings.CrmSiteFieldLabel,
-                placeholder: this._tenantSiteUrl || this.context.pageContext.web.absoluteUrl,
+                placeholder: this._tenantSiteUrl || this._foundSiteUrl || this.context.pageContext.web.absoluteUrl,
                 description: strings.CrmSiteFieldDescription
               }),
               PropertyPaneLabel('listsInfo', { text: strings.ListsInfo }),

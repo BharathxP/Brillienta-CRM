@@ -195,7 +195,7 @@ Version 3.5 ships a Copilot agent inside the `.sppkg` (SPFx 1.24 Copilot Compone
 
 * SharePoint Framework 1.24 Copilot Components must be available in the tenant (rolling out; Targeted release tenants get it first).
 * Users need a Microsoft 365 Copilot licence.
-* The **main CRM site** must be set, because Copilot does not run on the CRM site: open the CRM on its site and choose *Settings › Microsoft Teams › Main CRM site* › **Use this site** (or `Set-PnPStorageEntity -Key "BrillientaCRM.SiteUrl" -Value "https://contoso.sharepoint.com/sites/crm" -Scope Tenant`). This is the same setting the Teams personal app uses.
+* Nothing else to configure. Copilot does not run on the CRM site, so it finds the CRM the same way as the Teams personal app: with SharePoint Search, for the signed-in person (no admin rights or PowerShell). A SharePoint admin can optionally pin one CRM site when the tenant has several (see [Microsoft Teams](#microsoft-teams)).
 
 **Install**
 
@@ -206,7 +206,7 @@ Version 3.5 ships a Copilot agent inside the `.sppkg` (SPFx 1.24 Copilot Compone
 **How it behaves**
 
 * Each tool reads only the lists it needs (for example the pipeline reads opportunities, accounts, activities and quotes) once per Copilot session.
-* Users see exactly what they can see in the CRM. If they have no access to the CRM site, or the main CRM site is not set, the card says so.
+* Users see exactly what they can see in the CRM. If they have no access to the CRM site, or search does not find it yet, the card says so.
 * `CreateLead` never saves by itself. Copilot prefills the form; the user reviews it and presses **Save**. The save goes through the same rules as the web part (permissions, read-only licence, scoring, assignment, enrichment, webhooks, audit).
 * "Open" links go to the record's SharePoint item page.
 
@@ -235,16 +235,13 @@ Also set `Status = New`. The flow must end with a Response of HTTP 200.
 
 The CRM runs as a **Teams personal app** (left rail) and as a **channel tab**, and also in Outlook and the Microsoft 365 app.
 
-1. **One CRM for everyone:** open the CRM on your CRM site, go to *Settings › Microsoft Teams* and click **Use this site as the default CRM**. Teams tabs run on the team's own site and the personal app runs on the root site, so this setting tells them where the data lives. It's stored as a tenant property (`BrillientaCRM.SiteUrl`).
+1. **One CRM for everyone, found automatically:** Teams tabs run on the team's own site and the personal app runs on the root site, so the CRM finds its data by itself, in this order:
+   * the site the tab runs on, if it has the CRM lists;
+   * otherwise SharePoint Search finds the `CRM Opportunities` list the person can read. Nothing to set up and no admin rights or PowerShell needed. A brand-new CRM site appears in search within minutes to a few hours.
 
-   This needs app catalog admin rights. The PowerShell alternative is:
-
-   ```powershell
-   Set-PnPStorageEntity -Key "BrillientaCRM.SiteUrl" -Value "https://contoso.sharepoint.com/sites/crm" -Scope Tenant
-   ```
-
+   *Settings › Microsoft Teams › Main CRM site* shows whether search already finds the CRM. **Optional:** when a tenant has more than one CRM, a SharePoint admin can pin one for everyone with **Pin this site** (needs app catalog admin rights) or `Set-PnPStorageEntity -Key "BrillientaCRM.SiteUrl" -Value "https://contoso.sharepoint.com/sites/crm" -Scope Tenant`. A pinned site always wins.
 2. **Publish to Teams:** in the App Catalog, select *Brillienta CRM* › **Sync to Teams**. The solution includes a branded Teams app package (`teams/TeamsSPFxApp.zip`). Alternatively, upload `teams-app/dist/BrillientaCRM-Teams.zip` in the Teams admin center › Manage apps.
-3. **Channel tab:** the tab settings show the **CRM site URL** field. Leave it empty to use the default CRM, or point the team at another site, such as a separate CRM for one team.
+3. **Channel tab:** the tab settings show the **CRM site URL** field. Leave it empty to find the CRM automatically, or point the team at another site, such as a separate CRM for one team.
 
 In Teams, the CRM follows the Teams theme (light, dark or high contrast). It uses an app-style layout with fixed navigation. If pop-ups are blocked, quotes download as an HTML file instead of opening a print window. The CRM site URL can also be set per web part in SharePoint (*CRM data* in the property pane).
 
