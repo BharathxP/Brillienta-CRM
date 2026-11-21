@@ -9,6 +9,34 @@
           "manifest": "./src/webparts/brillientaCrm/BrillientaCrmWebPart.manifest.json"
         }
       ]
+    },
+    "brillienta-crm-copilot": {
+      "components": [
+        {
+          "entrypoint": "./lib/copilotComponents/crmPipeline/CrmPipelineCopilotComponent.js",
+          "manifest": "./src/copilotComponents/crmPipeline/CrmPipelineCopilotComponent.manifest.json"
+        },
+        {
+          "entrypoint": "./lib/copilotComponents/crmAccountSummary/CrmAccountSummaryCopilotComponent.js",
+          "manifest": "./src/copilotComponents/crmAccountSummary/CrmAccountSummaryCopilotComponent.manifest.json"
+        },
+        {
+          "entrypoint": "./lib/copilotComponents/crmRenewals/CrmRenewalsCopilotComponent.js",
+          "manifest": "./src/copilotComponents/crmRenewals/CrmRenewalsCopilotComponent.manifest.json"
+        },
+        {
+          "entrypoint": "./lib/copilotComponents/crmOverdueInvoices/CrmOverdueInvoicesCopilotComponent.js",
+          "manifest": "./src/copilotComponents/crmOverdueInvoices/CrmOverdueInvoicesCopilotComponent.manifest.json"
+        },
+        {
+          "entrypoint": "./lib/copilotComponents/crmSlaRiskCases/CrmSlaRiskCasesCopilotComponent.js",
+          "manifest": "./src/copilotComponents/crmSlaRiskCases/CrmSlaRiskCasesCopilotComponent.manifest.json"
+        },
+        {
+          "entrypoint": "./lib/copilotComponents/crmCreateLead/CrmCreateLeadCopilotComponent.js",
+          "manifest": "./src/copilotComponents/crmCreateLead/CrmCreateLeadCopilotComponent.manifest.json"
+        }
+      ]
     }
   },
   "externals": {},

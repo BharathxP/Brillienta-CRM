@@ -1,0 +1,7 @@
+{
+  "extends": "@microsoft/spfx-web-build-rig/profiles/default/config/jest.config.json",
+  // @microsoft/sp-http needs unpublished Microsoft-internal modules under Jest; the tests never call SharePoint.
+  "moduleNameMapper": {
+    "^@microsoft/sp-http$": "<rootDir>/lib-commonjs/copilotComponents/shared/__mocks__/spHttp.js"
+  }
+}

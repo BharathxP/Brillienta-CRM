@@ -1,0 +1,39 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/copilot/declarative-agent/v1.7/schema.json",
+  "version": "v1.7",
+  "name": "Brillienta CRM",
+  "description": "Your CRM in Copilot: pipeline with deal health, account summaries, renewals, overdue invoices, SLA-risk cases and new leads, using your own Brillienta CRM permissions.",
+  "instructions": "$[file('instruction.txt')]",
+  "conversation_starters": [
+    {
+      "title": "My pipeline",
+      "text": "Show my open deals closing this quarter."
+    },
+    {
+      "title": "Deals at risk",
+      "text": "Which of my deals are at risk?"
+    },
+    {
+      "title": "Account summary",
+      "text": "Summarise the account Contoso."
+    },
+    {
+      "title": "Renewals",
+      "text": "Which subscriptions renew in the next 60 days?"
+    },
+    {
+      "title": "Overdue invoices",
+      "text": "Show invoices more than 30 days overdue."
+    },
+    {
+      "title": "SLA risk",
+      "text": "Which support cases are breaching or close to breaching their SLA?"
+    }
+  ],
+  "actions": [
+    {
+      "id": "brillientaCrmAction",
+      "file": "ai-plugin.json"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/spfx/client-side-component-manifest.schema.json",
+  "id": "bf25a469-5133-4260-a96e-5adc1d144367",
+  "alias": "CrmSlaRiskCasesCopilotComponent",
+  "componentType": "CopilotComponent",
+  "copilotType": "Ux",
+  "version": "*",
+  "manifestVersion": 2,
+  "capabilities": {
+    "availableDisplayModes": [
+      "inline",
+      "fullscreen"
+    ]
+  },
+  "tools": [
+    {
+      "name": "GetSlaRiskCases",
+      "description": {
+        "default": "List open Brillienta CRM support cases that have breached their SLA, have a late first response, or are due within the next hours. Use for prompts such as 'Which cases are breaching SLA?' or 'High priority cases at risk today'. Pass windowHours (default 24), priority (Low, Normal, High, Critical) and onlyMine only when stated."
+      },
+      "propertiesSchema": {
+        "id": "$../../../lib/copilotComponents/crmSlaRiskCases/CrmSlaRiskCasesCopilotComponentProperties.js:default;"
+      }
+    }
+  ]
+}

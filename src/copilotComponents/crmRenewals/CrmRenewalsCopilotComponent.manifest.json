@@ -1,0 +1,26 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/spfx/client-side-component-manifest.schema.json",
+  "id": "b23dbe84-b8f5-4357-9fdf-a13385cb7dcd",
+  "alias": "CrmRenewalsCopilotComponent",
+  "componentType": "CopilotComponent",
+  "copilotType": "Ux",
+  "version": "*",
+  "manifestVersion": 2,
+  "capabilities": {
+    "availableDisplayModes": [
+      "inline",
+      "fullscreen"
+    ]
+  },
+  "tools": [
+    {
+      "name": "GetRenewals",
+      "description": {
+        "default": "List Brillienta CRM subscriptions that renew soon, with renewal date, ARR, seats and whether they auto-renew. Use for prompts such as 'Which subscriptions renew in the next 60 days?' or 'My renewals this month'. Pass days for the window (default 60), onlyMine when the user says 'my', and includeAutoRenew false when they want only manual renewals."
+      },
+      "propertiesSchema": {
+        "id": "$../../../lib/copilotComponents/crmRenewals/CrmRenewalsCopilotComponentProperties.js:default;"
+      }
+    }
+  ]
+}

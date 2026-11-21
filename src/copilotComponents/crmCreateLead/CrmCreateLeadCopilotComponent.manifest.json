@@ -1,0 +1,26 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/spfx/client-side-component-manifest.schema.json",
+  "id": "a1836c6b-fb62-431e-97db-1b30c664726b",
+  "alias": "CrmCreateLeadCopilotComponent",
+  "componentType": "CopilotComponent",
+  "copilotType": "Ux",
+  "version": "*",
+  "manifestVersion": 2,
+  "capabilities": {
+    "availableDisplayModes": [
+      "inline",
+      "fullscreen"
+    ]
+  },
+  "tools": [
+    {
+      "name": "CreateLead",
+      "description": {
+        "default": "Open a reviewable new-lead form in Brillienta CRM, prefilled from the prompt. Use for prompts such as 'Add a lead: Priya Shah, CTO at Contoso, priya@contoso.com, met at the expo'. Pass firstName, lastName, email, phone, company, jobTitle, country, leadSource, rating and description only from details the user gives. The lead is saved only when the user reviews the form and presses Save; never claim it was created before that."
+      },
+      "propertiesSchema": {
+        "id": "$../../../lib/copilotComponents/crmCreateLead/CrmCreateLeadCopilotComponentProperties.js:default;"
+      }
+    }
+  ]
+}

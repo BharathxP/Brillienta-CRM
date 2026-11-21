@@ -1,0 +1,26 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/spfx/client-side-component-manifest.schema.json",
+  "id": "186388da-6bd8-48bf-8697-426040229744",
+  "alias": "CrmAccountSummaryCopilotComponent",
+  "componentType": "CopilotComponent",
+  "copilotType": "Ux",
+  "version": "*",
+  "manifestVersion": 2,
+  "capabilities": {
+    "availableDisplayModes": [
+      "inline",
+      "fullscreen"
+    ]
+  },
+  "tools": [
+    {
+      "name": "GetAccountSummary",
+      "description": {
+        "default": "Show a 360 view of one customer account in Brillienta CRM: open deals, open support cases with SLA, active subscriptions and renewals, unpaid invoices, contacts and recent activity. Use for prompts such as 'Summarise Contoso' or 'What is going on with Fabrikam?'. Pass accountName with the company name exactly as the user wrote it. Do not use for lists across many accounts."
+      },
+      "propertiesSchema": {
+        "id": "$../../../lib/copilotComponents/crmAccountSummary/CrmAccountSummaryCopilotComponentProperties.js:default;"
+      }
+    }
+  ]
+}

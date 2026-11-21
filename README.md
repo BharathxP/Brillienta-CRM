@@ -2,6 +2,21 @@
 
 A complete CRM delivered as one SharePoint Framework (SPFx 1.24) web part. All data is stored in SharePoint lists **in the customer's own Microsoft 365 tenant**. There is no external database or server.
 
+## What's new in 3.5
+
+* **Brillienta CRM in Microsoft 365 Copilot** (SPFx 1.24 Copilot Components). The `.sppkg` now also contains a Copilot agent, **Brillienta CRM**, whose six tools render live CRM data as interactive cards in the Copilot chat:
+
+  | Tool | Example prompt | Shows |
+  |---|---|---|
+  | `GetMyPipeline` | "Which of my deals are at risk?" | Open deals with stage, amount, close date and AI deal health; total, weighted and at-risk KPIs. Filters: mine / team / all, period, health, minimum amount |
+  | `GetAccountSummary` | "Summarise Contoso" | Account 360: open deals, open cases with SLA, subscriptions and ARR, unpaid invoices, activity. Picks from a list when several accounts match |
+  | `GetRenewals` | "Which subscriptions renew in the next 60 days?" | Renewals in the window with ARR, seats and auto-renew; past-due pending renewals first |
+  | `GetOverdueInvoices` | "Invoices more than 30 days overdue" | Unpaid invoices past due, with open balance and days overdue |
+  | `GetSlaRiskCases` | "Which cases are breaching SLA?" | Breached cases, late first replies and cases due soon (Enterprise plan) |
+  | `CreateLead` | "Add a lead: Priya Shah, CTO at Contoso, met at the expo" | A prefilled lead form with duplicate check. Nothing is saved until the user presses **Save**; then the normal scoring, round-robin assignment, enrichment, alerts and audit run |
+
+  Every card has **Open** links to the records, and tells Copilot what it shows, so users can ask follow-up questions ("draft an email to the first customer"). Data is read with the user's own permissions through the same engine as the web part: record-level security, "reps see only their own records", licence plan and read-only trial expiry all apply. Nothing is copied out of SharePoint. See [Microsoft 365 Copilot](#microsoft-365-copilot) for setup.
+
 ## What's new in 3.4
 
 * **Brillienta Helpdesk integration** (Settings › Service › Brillienta Helpdesk): connect the Helpdesk site and test the connection.
@@ -89,7 +104,7 @@ Upgrading from 2.0: deploy the new `.sppkg`, open the CRM as an administrator an
 | **Outlook email** | Send from the user's mailbox via Microsoft Graph (`Mail.Send`), with templates and placeholders; automatically logged to the record |
 | **Outlook sync** | Per-user opt-in (My work › Turn on). Every 15 minutes while the CRM is open, it reads the user's inbox, sent items and calendar (`Mail.Read`, `Calendars.ReadWrite`) and logs conversations and meetings with known contacts and leads on their timelines, with a link back to Outlook. Internal mail is never logged, and items are de-duplicated |
 | **WhatsApp Business** | **Click to chat** (free; opens WhatsApp with the message and a template filled in) or the **WhatsApp Business Cloud API** through Power Automate, which sends approved templates and free text and receives replies, with delivery and read status. Unknown numbers become WhatsApp leads. Everything is logged on the timeline |
-| **Microsoft 365 Copilot** | Settings › Integrations › **Download Copilot agent**. This is a declarative agent (Teams manifest 1.19) whose knowledge is the CRM site, so it answers with each user's own permissions. Upload it in the Teams admin center. It needs Microsoft 365 Copilot licences |
+| **Microsoft 365 Copilot** | **Built-in agent** (3.5): six SPFx Copilot Components ship in the `.sppkg` and render live pipeline, account, renewal, invoice, case and new-lead cards in Copilot. See [Microsoft 365 Copilot](#microsoft-365-copilot). **Knowledge agent**: Settings › Integrations › **Download Copilot agent** builds a declarative agent (Teams manifest 1.19) grounded in the CRM site, for text answers across all lists. Upload it in the Teams admin center. Both need Microsoft 365 Copilot licences |
 | **Inbound REST API** | Power Automate flow *Inbound API*: `POST {entity, action: create/upsert/get, match: {field, value}, fields}` with an `x-api-key` header, for ERPs, billing systems, Zapier or Make |
 | **Power BI** | Settings › Integrations › Power BI: connect Power BI Desktop to the CRM lists (SharePoint Online list 2.0), with the relationships documented. Data stays protected by SharePoint permissions |
 | **Payments** | Razorpay and Stripe payment links and payment webhooks through Power Automate. API keys never reach the browser |
@@ -135,6 +150,14 @@ src/webparts/brillientaCrm/
   services/Enrichment.ts        lead/account enrichment (domain → website/company)
   services/Marketing.ts         email campaigns, unsubscribe links, audience export
   i18n/                         UI languages (index.ts) and translation table (table.ts)
+src/copilotComponents/          Microsoft 365 Copilot tools (SPFx 1.24 Copilot Components)
+  shared/crmSession.ts          finds the CRM site (tenant property) and opens a CRM Engine session as the user
+  shared/crmQueries.ts          what each tool shows (pure functions over the Engine; unit-tested)
+  shared/CrmCopilotComponentBase.tsx  React root, Copilot theme, links, model context
+  crmPipeline/ crmAccountSummary/ crmRenewals/ crmOverdueInvoices/ crmSlaRiskCases/ crmCreateLead/
+                                one folder per tool: manifest (tool name + description), parameter schema, view
+copilot/                        the Copilot agent: Teams manifest, declarative agent, instructions, plugin seed
+config/copilot-agent.json       which components the agent exposes (the build generates teams/brillienta-crm.zip)
 outlook-addin/                  Outlook add-in (manifest.xml + web/ task pane)
   components/core/              generic grid, record panel, fields, charts, dialogs, quote editor
   components/pages/             dashboard, my work, calendar, forecast, reports, settings, audit, setup
@@ -163,6 +186,35 @@ npm start            # local dev server for the hosted workbench
 4. A site owner opens the page and clicks **Set up CRM**.
 5. Go to *Admin › Settings*. Set up branding, the pipeline, quotas and integrations. Under *Security*, click **Create groups & apply list permissions** and add users to the groups.
 6. **Full screen:** the CRM opens full screen by default, covering the SharePoint header and navigation. Users can switch it with the ⛶ button in the CRM header, and their choice is remembered. Admins can turn it off in the web part properties. While the page is being edited, the CRM never covers the SharePoint editor. For the cleanest result, create the page with **Site contents › New › Page › App**, then choose Brillienta CRM.
+
+## Microsoft 365 Copilot
+
+Version 3.5 ships a Copilot agent inside the `.sppkg` (SPFx 1.24 Copilot Components). There is no separate app to upload and no API key: the tools call SharePoint as the signed-in user.
+
+**Requirements**
+
+* SharePoint Framework 1.24 Copilot Components must be available in the tenant (rolling out; Targeted release tenants get it first).
+* Users need a Microsoft 365 Copilot licence.
+* The **main CRM site** must be set, because Copilot does not run on the CRM site: open the CRM on its site and choose *Settings › Microsoft Teams › Main CRM site* › **Use this site** (or `Set-PnPStorageEntity -Key "BrillientaCRM.SiteUrl" -Value "https://contoso.sharepoint.com/sites/crm" -Scope Tenant`). This is the same setting the Teams personal app uses.
+
+**Install**
+
+1. Deploy `brillienta-crm.sppkg` to the App Catalog as usual. The package contains the six Copilot Components and the agent package (`ClientSideAssets/brillienta-crm.zip`).
+2. Make the agent available in the Microsoft 365 admin center (*Agents* / *Integrated apps*) if your tenant requires admin approval for agents.
+3. In Copilot, open the **Brillienta CRM** agent and try a conversation starter, such as "Show my open deals closing this quarter."
+
+**How it behaves**
+
+* Each tool reads only the lists it needs (for example the pipeline reads opportunities, accounts, activities and quotes) once per Copilot session.
+* Users see exactly what they can see in the CRM. If they have no access to the CRM site, or the main CRM site is not set, the card says so.
+* `CreateLead` never saves by itself. Copilot prefills the form; the user reviews it and presses **Save**. The save goes through the same rules as the web part (permissions, read-only licence, scoring, assignment, enrichment, webhooks, audit).
+* "Open" links go to the record's SharePoint item page.
+
+**Change or add a tool**
+
+Tools live in `src/copilotComponents/<tool>/`. The tool name and the description Copilot uses to choose it are in the `*.manifest.json`, the parameters are in `*Properties.ts` (plain JSON Schema, portable plugin v2.4 subset, no imports), and the agent's routing rules are in `copilot/instruction.txt`. New components also need an entry in `config/config.json` (bundle `brillienta-crm-copilot`) and `config/copilot-agent.json`; `toolSchemas.test.ts` checks this. Microsoft recommends creating new components with `yo @microsoft/sharepoint --component-type copilotComponent`.
+
+**Not yet verified in a live tenant:** the tools are unit-tested and render-tested with sample data, and the package builds, but routing by Copilot, SharePoint calls from the Copilot host, and the Copilot iframe's content security policy have to be checked in a tenant where SPFx Copilot Components are enabled.
 
 ## AppSource leads → CRM
 

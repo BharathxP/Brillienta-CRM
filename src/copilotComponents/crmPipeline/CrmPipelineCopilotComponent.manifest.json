@@ -1,0 +1,26 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/spfx/client-side-component-manifest.schema.json",
+  "id": "b80af107-127d-4bc9-9588-439b14282ac2",
+  "alias": "CrmPipelineCopilotComponent",
+  "componentType": "CopilotComponent",
+  "copilotType": "Ux",
+  "version": "*",
+  "manifestVersion": 2,
+  "capabilities": {
+    "availableDisplayModes": [
+      "inline",
+      "fullscreen"
+    ]
+  },
+  "tools": [
+    {
+      "name": "GetMyPipeline",
+      "description": {
+        "default": "Show open sales opportunities (deals) from Brillienta CRM with stage, amount, close date and an AI deal-health score. Use for prompts such as 'Show my pipeline', 'Which of my deals close this quarter?', 'Deals at risk', or 'Team deals over 10k closing this month'. Pass scope (mine, team, all), period (thisQuarter, nextQuarter, thisMonth, overdue, all), health and minAmount only when the user states them. Do not use for one company's full picture; use GetAccountSummary."
+      },
+      "propertiesSchema": {
+        "id": "$../../../lib/copilotComponents/crmPipeline/CrmPipelineCopilotComponentProperties.js:default;"
+      }
+    }
+  ]
+}

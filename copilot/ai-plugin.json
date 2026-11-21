@@ -1,0 +1,9 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/copilot/plugin/v2.4/schema.json",
+  "schema_version": "v2.4",
+  "namespace": "brillientaCrm",
+  "name_for_human": "Brillienta CRM",
+  "description_for_human": "Pipeline, accounts, renewals, overdue invoices, SLA-risk cases and new leads from Brillienta CRM.",
+  "description_for_model": "Render live Brillienta CRM data in the Copilot canvas with six tools: GetMyPipeline, GetAccountSummary, GetRenewals, GetOverdueInvoices, GetSlaRiskCases and CreateLead. Data comes from the customer's own SharePoint site with the signed-in user's permissions. Select the single narrowest tool from its description. Prompt values only filter a view or prefill the lead form; nothing is created or changed unless the user presses Save in the form.",
+  "contact_email": "support@brillienta.com"
+}
