@@ -34,5 +34,5 @@ All data stays in the customer's SharePoint. The add-in calls SharePoint REST wi
 
 ## Limits
 
-* It uses the default list names (`CRM Contacts`, `AppSource Leads`, …). Sites that renamed lists in the web part properties aren't supported by the add-in yet.
+* It uses the default list names (`BrillCRM_Contacts`, `BrillCRM_Leads`, …). Sites that renamed lists in the web part properties aren't supported by the add-in yet.
 * It doesn't work in compose mode (read mode only).

@@ -113,7 +113,7 @@ export const LOST = 'Closed Lost';
 
 export const ENTITIES: IEntityDef[] = [
   {
-    key: 'leads', listTitle: 'AppSource Leads', singular: 'Lead', plural: 'Leads', icon: 'People', area: 'Sales', plan: 'standard',
+    key: 'leads', listTitle: 'BrillCRM_Leads', singular: 'Lead', plural: 'Leads', icon: 'People', area: 'Sales', plan: 'standard',
     description: 'Prospects from AppSource, web forms, events and manual entry', activityName: 'Lead', boardField: 'status',
     searchFields: ['title', 'email', 'company', 'phone', 'country', 'offer'],
     fields: [
@@ -161,7 +161,7 @@ export const ENTITIES: IEntityDef[] = [
     ]
   },
   {
-    key: 'accounts', listTitle: 'CRM Accounts', singular: 'Account', plural: 'Accounts', icon: 'CityNext', area: 'Sales', plan: 'standard',
+    key: 'accounts', listTitle: 'BrillCRM_Accounts', singular: 'Account', plural: 'Accounts', icon: 'CityNext', area: 'Sales', plan: 'standard',
     description: 'Companies you sell to, partner with or compete against', activityName: 'Account', boardField: 'accountType',
     searchFields: ['title', 'website', 'email', 'phone', 'city', 'country'],
     related: [
@@ -199,7 +199,7 @@ export const ENTITIES: IEntityDef[] = [
     ]
   },
   {
-    key: 'contacts', listTitle: 'CRM Contacts', singular: 'Contact', plural: 'Contacts', icon: 'Contact', area: 'Sales', plan: 'standard',
+    key: 'contacts', listTitle: 'BrillCRM_Contacts', singular: 'Contact', plural: 'Contacts', icon: 'Contact', area: 'Sales', plan: 'standard',
     description: 'People at your accounts', activityName: 'Contact',
     searchFields: ['title', 'email', 'phone', 'mobile', 'jobTitle'],
     related: [
@@ -240,7 +240,7 @@ export const ENTITIES: IEntityDef[] = [
     ]
   },
   {
-    key: 'opportunities', listTitle: 'CRM Opportunities', singular: 'Opportunity', plural: 'Opportunities', icon: 'Money', area: 'Sales', plan: 'standard',
+    key: 'opportunities', listTitle: 'BrillCRM_Opportunities', singular: 'Opportunity', plural: 'Opportunities', icon: 'Money', area: 'Sales', plan: 'standard',
     description: 'Deals in your sales pipeline', activityName: 'Opportunity', boardField: 'stage',
     searchFields: ['title', 'company', 'contactName', 'email', 'nextStep'],
     related: [{ entity: 'quotes', field: 'opportunityRef', label: 'Quotes' }, { entity: 'subscriptions', field: 'opportunityRef', label: 'Subscriptions' }],
@@ -276,7 +276,7 @@ export const ENTITIES: IEntityDef[] = [
     ]
   },
   {
-    key: 'quotes', listTitle: 'CRM Quotes', singular: 'Quote', plural: 'Quotes', icon: 'Document', area: 'Sales', plan: 'standard',
+    key: 'quotes', listTitle: 'BrillCRM_Quotes', singular: 'Quote', plural: 'Quotes', icon: 'Document', area: 'Sales', plan: 'standard',
     description: 'Priced proposals with line items, printable as PDF', activityName: 'Quote', boardField: 'quoteStatus',
     searchFields: ['title', 'quoteNumber'],
     related: [{ entity: 'invoices', field: 'quoteRef', label: 'Invoices' }, { entity: 'subscriptions', field: 'quoteRef', label: 'Subscriptions' }],
@@ -314,7 +314,7 @@ export const ENTITIES: IEntityDef[] = [
     ]
   },
   {
-    key: 'products', listTitle: 'CRM Products', singular: 'Product', plural: 'Products', icon: 'Product', area: 'Catalog', plan: 'standard',
+    key: 'products', listTitle: 'BrillCRM_Products', singular: 'Product', plural: 'Products', icon: 'Product', area: 'Catalog', plan: 'standard',
     description: 'Your price list, used on quotes', activityName: 'Product',
     searchFields: ['title', 'sku', 'category'],
     fields: [
@@ -329,7 +329,7 @@ export const ENTITIES: IEntityDef[] = [
     ]
   },
   {
-    key: 'demos', listTitle: 'CRM Demo Requests', singular: 'Demo request', plural: 'Demo requests', icon: 'Presentation', area: 'Marketing', plan: 'standard',
+    key: 'demos', listTitle: 'BrillCRM_DemoRequests', singular: 'Demo request', plural: 'Demo requests', icon: 'Presentation', area: 'Marketing', plan: 'standard',
     description: 'Product demo requests and scheduled demos', activityName: 'Demo', boardField: 'status',
     searchFields: ['title', 'contactName', 'email', 'company', 'notes'],
     fields: [
@@ -352,7 +352,7 @@ export const ENTITIES: IEntityDef[] = [
     ]
   },
   {
-    key: 'cases', listTitle: 'CRM Cases', singular: 'Case', plural: 'Cases', icon: 'Headset', area: 'Service', plan: 'enterprise',
+    key: 'cases', listTitle: 'BrillCRM_Cases', singular: 'Case', plural: 'Cases', icon: 'Headset', area: 'Service', plan: 'enterprise',
     description: 'Customer support tickets with SLA tracking', activityName: 'Case', boardField: 'caseStatus',
     searchFields: ['title', 'caseNumber', 'description', 'resolution'],
     fields: [
@@ -382,7 +382,7 @@ export const ENTITIES: IEntityDef[] = [
     ]
   },
   {
-    key: 'articles', listTitle: 'CRM Knowledge Base', singular: 'Article', plural: 'Knowledge base', icon: 'KnowledgeArticle', area: 'Service', plan: 'enterprise',
+    key: 'articles', listTitle: 'BrillCRM_KnowledgeBase', singular: 'Article', plural: 'Knowledge base', icon: 'KnowledgeArticle', area: 'Service', plan: 'enterprise',
     description: 'Answers to common questions, suggested on cases', activityName: 'Article', boardField: 'articleStatus',
     searchFields: ['title', 'body', 'keywords'],
     related: [{ entity: 'cases', field: 'articleRef', label: 'Cases' }],
@@ -399,7 +399,7 @@ export const ENTITIES: IEntityDef[] = [
     ]
   },
   {
-    key: 'campaigns', listTitle: 'CRM Campaigns', singular: 'Campaign', plural: 'Campaigns', icon: 'Megaphone', area: 'Marketing', plan: 'enterprise',
+    key: 'campaigns', listTitle: 'BrillCRM_Campaigns', singular: 'Campaign', plural: 'Campaigns', icon: 'Megaphone', area: 'Marketing', plan: 'enterprise',
     description: 'Marketing campaigns with lead attribution and ROI', activityName: 'Campaign', boardField: 'campaignStatus',
     searchFields: ['title', 'description'],
     related: [
@@ -422,7 +422,7 @@ export const ENTITIES: IEntityDef[] = [
     ]
   },
   {
-    key: 'subscriptions', listTitle: 'CRM Subscriptions', singular: 'Subscription', plural: 'Subscriptions', icon: 'RecurringEvent', area: 'Sales', plan: 'standard',
+    key: 'subscriptions', listTitle: 'BrillCRM_Subscriptions', singular: 'Subscription', plural: 'Subscriptions', icon: 'RecurringEvent', area: 'Sales', plan: 'standard',
     description: 'Licences and recurring revenue with renewal dates', activityName: 'Subscription', boardField: 'subStatus',
     searchFields: ['title', 'licenseKey', 'notes'],
     related: [
@@ -454,7 +454,7 @@ export const ENTITIES: IEntityDef[] = [
     ]
   },
   {
-    key: 'invoices', listTitle: 'CRM Invoices', singular: 'Invoice', plural: 'Invoices', icon: 'Money', area: 'Sales', plan: 'standard',
+    key: 'invoices', listTitle: 'BrillCRM_Invoices', singular: 'Invoice', plural: 'Invoices', icon: 'Money', area: 'Sales', plan: 'standard',
     description: 'Invoices with payment links and accounting export', activityName: 'Invoice', boardField: 'invoiceStatus',
     searchFields: ['title', 'invoiceNumber', 'externalRef'],
     fields: [
@@ -487,7 +487,7 @@ export const ENTITIES: IEntityDef[] = [
     ]
   },
   {
-    key: 'activities', listTitle: 'CRM Activities', singular: 'Activity', plural: 'Activities', icon: 'TaskManager', area: 'Work', plan: 'standard',
+    key: 'activities', listTitle: 'BrillCRM_Activities', singular: 'Activity', plural: 'Activities', icon: 'TaskManager', area: 'Work', plan: 'standard',
     description: 'Calls, emails, meetings, notes and tasks', activityName: 'Activity',
     searchFields: ['title', 'details'],
     fields: [
@@ -512,11 +512,11 @@ export const ENTITIES: IEntityDef[] = [
 
 export const SYSTEM_LISTS: Record<SystemListKey, { listTitle: string; description: string; fields: IFieldDef[] }> = {
   settings: {
-    listTitle: 'CRM Settings', description: 'Brillienta CRM configuration (do not edit by hand)',
+    listTitle: 'BrillCRM_Settings', description: 'Brillienta CRM configuration (do not edit by hand)',
     fields: [f('value', 'Value', 'note')]
   },
   audit: {
-    listTitle: 'CRM Audit Log', description: 'Brillienta CRM change history',
+    listTitle: 'BrillCRM_AuditLog', description: 'Brillienta CRM change history',
     fields: [
       f('entityType', 'Entity', 'text'),
       f('recordId', 'Record ID', 'number'),

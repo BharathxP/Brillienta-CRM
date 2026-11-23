@@ -53,7 +53,7 @@ const host = (c, op) => ({ connectionName: CONN[c].api, operationId: op, apiId: 
 const api = (c, op, parameters, runAfter = {}, extra = {}) => ({
   runAfter, type: 'OpenApiConnection', inputs: { host: host(c, op), parameters, authentication: "@parameters('$authentication')" }, ...extra
 });
-const LISTS = { demos: 'CRM Demo Requests', leads: 'AppSource Leads', accounts: 'CRM Accounts', opps: 'CRM Opportunities', quotes: 'CRM Quotes', cases: 'CRM Cases', acts: 'CRM Activities', invoices: 'CRM Invoices', subs: 'CRM Subscriptions', contacts: 'CRM Contacts', settingsList: 'CRM Settings', articles: 'CRM Knowledge Base' };
+const LISTS = { demos: 'BrillCRM_DemoRequests', leads: 'BrillCRM_Leads', accounts: 'BrillCRM_Accounts', opps: 'BrillCRM_Opportunities', quotes: 'BrillCRM_Quotes', cases: 'BrillCRM_Cases', acts: 'BrillCRM_Activities', invoices: 'BrillCRM_Invoices', subs: 'BrillCRM_Subscriptions', contacts: 'BrillCRM_Contacts', settingsList: 'BrillCRM_Settings', articles: 'BrillCRM_KnowledgeBase' };
 
 const getItems = (list, filter, runAfter = {}, top = 500) =>
   api('sp', 'GetItems', { dataset: P('site'), table: LISTS[list], '$filter': filter, '$top': top }, runAfter);
@@ -184,7 +184,7 @@ Page: @{coalesce(${L('page')}, '')}   Landing page: @{coalesce(${L('landing_page
           expression: { and: [{ equals: ["@outputs('Kind')", 'support'] }] },
           // ---------------- support request → case
           actions: {
-            Find_contact: api('sp', 'GetItems', { dataset: P('site'), table: 'CRM Contacts', '$filter': `Email eq '@{replace(toLower(${L('email')}), '''', '''''')}'`, '$top': 1 }),
+            Find_contact: api('sp', 'GetItems', { dataset: P('site'), table: 'BrillCRM_Contacts', '$filter': `Email eq '@{replace(toLower(${L('email')}), '''', '''''')}'`, '$top': 1 }),
             Priority: { runAfter: { Find_contact: ['Succeeded', 'Failed'] }, type: 'Compose', inputs: `@if(equals(${L('impact')}, 'Everyone is blocked'), 'Critical', if(equals(${L('impact')}, 'Some people cannot work'), 'High', if(equals(${L('impact')}, 'Minor or cosmetic'), 'Low', 'Normal')))` },
             Create_case: api('sp', 'PostItem', {
               dataset: P('site'), table: LISTS.cases,
@@ -479,7 +479,7 @@ const contactLookup = {
   Has_contact: {
     runAfter: { Contact_email: ['Succeeded'] }, type: 'If', expression: { and: [{ greater: [`@coalesce(${T('ContactRef')}, 0)`, 0] }] },
     actions: {
-      Get_contact: api('sp', 'GetItem', { dataset: P('site'), table: 'CRM Contacts', id: `@${T('ContactRef')}` }),
+      Get_contact: api('sp', 'GetItem', { dataset: P('site'), table: 'BrillCRM_Contacts', id: `@${T('ContactRef')}` }),
       Use_contact_email: { runAfter: { Get_contact: ['Succeeded'] }, type: 'SetVariable', inputs: { name: 'contactEmail', value: "@{coalesce(body('Get_contact')?['Email'], '')}" } }
     },
     else: { actions: {} }
@@ -1026,7 +1026,7 @@ const spHttp = (method, uri, body, runAfter = {}, extraHeaders = {}) => api('sp'
 const jsonResponse = (status, body, runAfter = {}) => ({ runAfter, type: 'Response', kind: 'Http', inputs: { statusCode: status, headers: { 'Content-Type': 'application/json' }, body } });
 
 // 18 — Unsubscribe
-const UL = "@{if(startsWith(coalesce(triggerOutputs()?['queries']?['e'], ''), 'L'), 'AppSource Leads', 'CRM Contacts')}";
+const UL = "@{if(startsWith(coalesce(triggerOutputs()?['queries']?['e'], ''), 'L'), 'BrillCRM_Leads', 'BrillCRM_Contacts')}";
 flow('Brillienta CRM - Unsubscribe',
   'Personal unsubscribe page for CRM marketing emails. Shows a confirmation button (so mail scanners cannot unsubscribe people by opening the link), then marks the lead or contact Unsubscribed, removes marketing consent and logs it on the timeline. Requires Power Automate Premium (HTTP trigger).',
   ['sp'], ['site'],
@@ -1060,7 +1060,7 @@ flow('Brillienta CRM - Unsubscribe',
 
 // 19 — Inbound API
 const B = (k) => `triggerBody()?['${k}']`;
-const LIST_MAP = "{\"leads\":\"AppSource Leads\",\"contacts\":\"CRM Contacts\",\"accounts\":\"CRM Accounts\",\"opportunities\":\"CRM Opportunities\",\"cases\":\"CRM Cases\",\"activities\":\"CRM Activities\",\"demos\":\"CRM Demo Requests\",\"products\":\"CRM Products\",\"subscriptions\":\"CRM Subscriptions\",\"invoices\":\"CRM Invoices\"}";
+const LIST_MAP = "{\"leads\":\"BrillCRM_Leads\",\"contacts\":\"BrillCRM_Contacts\",\"accounts\":\"BrillCRM_Accounts\",\"opportunities\":\"BrillCRM_Opportunities\",\"cases\":\"BrillCRM_Cases\",\"activities\":\"BrillCRM_Activities\",\"demos\":\"BrillCRM_DemoRequests\",\"products\":\"BrillCRM_Products\",\"subscriptions\":\"BrillCRM_Subscriptions\",\"invoices\":\"BrillCRM_Invoices\"}";
 const MATCH_FIELDS = "createArray('Email', 'Title', 'Id', 'ExternalId', 'Whatsapp', 'CaseNumber', 'InvoiceNumber', 'QuoteNumber', 'Sku', 'Phone')";
 flow('Brillienta CRM - Inbound API',
   'REST endpoint for other systems (ERP, billing, web apps, Zapier/Make). POST JSON {"entity": "leads", "action": "create" | "upsert" | "get", "match": {"field": "Email", "value": "x@y.com"}, "fields": {SharePoint column: value}} with the header x-api-key. Returns {"id": …, "action": …}. Requires Power Automate Premium (HTTP trigger).',
@@ -1138,10 +1138,10 @@ flow('Brillienta CRM - Inbound API',
 
 // 20 — Record security (item-level permissions by owner and team)
 const SEC_LISTS = [
-  { list: 'AppSource Leads', owner: 'LeadOwner', cases: false }, { list: 'CRM Accounts', owner: 'AccountOwner', cases: false },
-  { list: 'CRM Contacts', owner: 'ContactOwner', cases: false }, { list: 'CRM Opportunities', owner: 'DealOwner', cases: false },
-  { list: 'CRM Quotes', owner: 'QuoteOwner', cases: false }, { list: 'CRM Cases', owner: 'CaseOwner', cases: true },
-  { list: 'CRM Subscriptions', owner: 'SubscriptionOwner', cases: false }, { list: 'CRM Invoices', owner: 'InvoiceOwner', cases: false }
+  { list: 'BrillCRM_Leads', owner: 'LeadOwner', cases: false }, { list: 'BrillCRM_Accounts', owner: 'AccountOwner', cases: false },
+  { list: 'BrillCRM_Contacts', owner: 'ContactOwner', cases: false }, { list: 'BrillCRM_Opportunities', owner: 'DealOwner', cases: false },
+  { list: 'BrillCRM_Quotes', owner: 'QuoteOwner', cases: false }, { list: 'BrillCRM_Cases', owner: 'CaseOwner', cases: true },
+  { list: 'BrillCRM_Subscriptions', owner: 'SubscriptionOwner', cases: false }, { list: 'BrillCRM_Invoices', owner: 'InvoiceOwner', cases: false }
 ];
 const S = (k) => `outputs('Settings')?['${k}']`;
 const grp = (name, key) => ({ [`Group_${name}`]: spHttp('GET', `_api/web/sitegroups/getbyname('@{replace(${S('groups')}?['${key}'], '''', '''''')}')?$select=Id`) });

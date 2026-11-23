@@ -12,10 +12,10 @@ import { SPHttpClient } from '@microsoft/sp-http';
 /** Same key as Settings › Microsoft Teams and the PnP PowerShell command. */
 export const TENANT_SITE_KEY = 'BrillientaCRM.SiteUrl';
 
-/** The CRM list that search looks for. Crawled (unlike CRM Settings), present on every CRM site and rarely renamed. */
-export const MARKER_LIST = 'CRM Opportunities';
+/** The CRM list that search looks for. Crawled (unlike BrillCRM_Settings), present on every CRM site and rarely renamed. */
+export const MARKER_LIST = 'BrillCRM_Opportunities';
 /** Lists that, together, show a site holds a CRM (checked on the current site). */
-const HERE_LISTS = ['CRM Settings', 'CRM Opportunities'];
+const HERE_LISTS = ['BrillCRM_Settings', 'BrillCRM_Opportunities'];
 
 export type CrmSiteSource = 'pinned' | 'here' | 'search';
 
@@ -46,8 +46,9 @@ export function crmSearchQuery(listTitle: string = MARKER_LIST): string {
 }
 
 /**
- * CRM sites from a search response: one per site, the most recently changed first. Only lists whose address ends in
- * /Lists/<name> are accepted, so a document or item that merely mentions the name is ignored.
+ * CRM sites from a search response: one per site, the most recently changed first. Only results whose address is the
+ * list itself (/Lists/<name>, usually reported as its default view /Lists/<name>/AllItems.aspx) are accepted, so a
+ * document or item that merely mentions the name is ignored.
  */
 export function parseCrmSearch(res: SearchResponse | undefined, listTitle: string = MARKER_LIST): ISearchHit[] {
   const rows = res?.PrimaryQueryResult?.RelevantResults?.Table?.Rows || [];
@@ -57,8 +58,13 @@ export function parseCrmSearch(res: SearchResponse | undefined, listTitle: strin
     const cell = (k: string): string => String((r.Cells.find(c => c.Key === k) || { Value: '' }).Value || '');
     const path = trim(cell('Path'));
     const webUrl = trim(cell('SPWebUrl'));
-    const leaf = decodeURIComponent(path.split('/').pop() || '').replace(/\s+/g, '').toLowerCase();
-    if (!webUrl || !/^https:\/\//i.test(webUrl) || leaf !== listName) { return; }
+    let decoded = path;
+    try { decoded = decodeURIComponent(path); } catch { /* keep as is */ }
+    const marker = `/lists/${listName}`;
+    const at = decoded.replace(/\s+/g, '').toLowerCase().lastIndexOf(marker);
+    const rest = at >= 0 ? decoded.replace(/\s+/g, '').toLowerCase().slice(at + marker.length) : undefined;
+    const isList = rest !== undefined && (rest === '' || /^\/(forms\/)?[^/]*\.aspx$/.test(rest) || rest === '/');
+    if (!webUrl || !/^https:\/\//i.test(webUrl) || !isList) { return; }
     if (hits.some(h => same(h.webUrl, webUrl))) { return; }
     hits.push({ webUrl, path, modified: cell('LastModifiedTime') });
   });

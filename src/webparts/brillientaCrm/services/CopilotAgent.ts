@@ -27,7 +27,7 @@ export function agentInstructions(o: IAgentOptions): string {
 
 The CRM is stored in these SharePoint lists:
 ${lists}
-- CRM Activities: emails, meetings, calls, WhatsApp messages, notes and tasks; RelatedType and RelatedId link an activity to a record.
+- BrillCRM_Activities: emails, meetings, calls, WhatsApp messages, notes and tasks; RelatedType and RelatedId link an activity to a record.
 
 How records link: AccountRef, ContactRef, OpportunityRef, QuoteRef and SubscriptionRef hold the ID of the related item. Opportunity Stage is one of the pipeline stages; "Closed Won" and "Closed Lost" are closed.
 

@@ -9,18 +9,20 @@ const searchResult = (...rows: any[]): any => ({ PrimaryQueryResult: { RelevantR
 describe('parseCrmSearch', () => {
   it('returns one entry per CRM site, most recently changed first', () => {
     const hits = parseCrmSearch(searchResult(
-      row('https://t.sharepoint.com/sites/old-crm/Lists/CRM Opportunities', 'https://t.sharepoint.com/sites/old-crm', '2025-01-01T00:00:00Z'),
-      row('https://t.sharepoint.com/sites/crm/Lists/CRMOpportunities/', 'https://t.sharepoint.com/sites/crm/', '2026-11-01T00:00:00Z'),
-      row('https://t.sharepoint.com/sites/crm/Lists/CRM%20Opportunities', 'https://t.sharepoint.com/sites/crm', '2026-10-01T00:00:00Z')
+      row('https://t.sharepoint.com/sites/old-crm/Lists/BrillCRM_Opportunities/AllItems.aspx', 'https://t.sharepoint.com/sites/old-crm', '2025-01-01T00:00:00Z'),
+      row('https://t.sharepoint.com/sites/crm/Lists/BrillCRM_Opportunities/', 'https://t.sharepoint.com/sites/crm/', '2026-11-01T00:00:00Z'),
+      row('https://t.sharepoint.com/sites/crm/Lists/BrillCRM%5FOpportunities', 'https://t.sharepoint.com/sites/crm', '2026-10-01T00:00:00Z')
     ));
     expect(hits.map(h => h.webUrl)).toEqual(['https://t.sharepoint.com/sites/crm', 'https://t.sharepoint.com/sites/old-crm']);
   });
 
   it('ignores results that are not the CRM list itself', () => {
     const hits = parseCrmSearch(searchResult(
-      row('https://t.sharepoint.com/sites/x/Shared Documents/CRM Opportunities.docx', 'https://t.sharepoint.com/sites/x', '2026-01-01'),
+      row('https://t.sharepoint.com/sites/x/Shared Documents/BrillCRM_Opportunities.docx', 'https://t.sharepoint.com/sites/x', '2026-01-01'),
       row('https://t.sharepoint.com/sites/y/Lists/Other', 'https://t.sharepoint.com/sites/y', '2026-01-01'),
-      row('https://t.sharepoint.com/sites/z/Lists/CRM Opportunities', '', '2026-01-01')
+      row('https://t.sharepoint.com/sites/w/Lists/BrillCRM_Opportunities/12_.000', 'https://t.sharepoint.com/sites/w', '2026-01-01'),
+      row('https://t.sharepoint.com/sites/v/Lists/BrillCRM_OpportunitiesArchive/AllItems.aspx', 'https://t.sharepoint.com/sites/v', '2026-01-01'),
+      row('https://t.sharepoint.com/sites/z/Lists/BrillCRM_Opportunities', '', '2026-01-01')
     ));
     expect(hits).toEqual([]);
     expect(parseCrmSearch(undefined)).toEqual([]);
@@ -28,7 +30,7 @@ describe('parseCrmSearch', () => {
   });
 
   it('searches for the list by title and type', () => {
-    expect(crmSearchQuery()).toBe('Title:"CRM Opportunities" contentclass:STS_List_GenericList');
+    expect(crmSearchQuery()).toBe('Title:"BrillCRM_Opportunities" contentclass:STS_List_GenericList');
   });
 });
 
@@ -46,21 +48,21 @@ describe('locateCrmSite', () => {
   });
 
   it('uses a pinned site first', async () => {
-    const found = await locateCrmSite(client({ pinned: 'https://t.sharepoint.com/sites/pinned/', hereLists: ['CRM Settings', 'CRM Opportunities'] }), HOST);
+    const found = await locateCrmSite(client({ pinned: 'https://t.sharepoint.com/sites/pinned/', hereLists: ['BrillCRM_Settings', 'BrillCRM_Opportunities'] }), HOST);
     expect(found).toEqual({ url: 'https://t.sharepoint.com/sites/pinned', source: 'pinned' });
   });
 
   it('uses the current site when it has the CRM lists', async () => {
-    const found = await locateCrmSite(client({ hereLists: ['CRM Settings', 'CRM Opportunities'] }), `${HOST}/sites/team/`);
+    const found = await locateCrmSite(client({ hereLists: ['BrillCRM_Settings', 'BrillCRM_Opportunities'] }), `${HOST}/sites/team/`);
     expect(found).toEqual({ url: `${HOST}/sites/team`, source: 'here' });
   });
 
   it('otherwise finds the CRM with SharePoint Search, without admin rights', async () => {
     const found = await locateCrmSite(client({
-      hereLists: ['CRM Settings'],
+      hereLists: ['BrillCRM_Settings'],
       search: searchResult(
-        row(`${HOST}/sites/crm/Lists/CRM Opportunities`, `${HOST}/sites/crm`, '2026-11-01'),
-        row(`${HOST}/sites/crm2/Lists/CRM Opportunities`, `${HOST}/sites/crm2`, '2026-01-01')
+        row(`${HOST}/sites/crm/Lists/BrillCRM_Opportunities`, `${HOST}/sites/crm`, '2026-11-01'),
+        row(`${HOST}/sites/crm2/Lists/BrillCRM_Opportunities`, `${HOST}/sites/crm2`, '2026-01-01')
       )
     }), HOST);
     expect(found).toEqual({ url: `${HOST}/sites/crm`, source: 'search', others: [`${HOST}/sites/crm2`] });

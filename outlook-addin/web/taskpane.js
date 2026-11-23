@@ -91,10 +91,10 @@
   // ---------------------------------------------------------------- actions
   function track(kind, rec, s) {
     var ext = ('mail:' + s.id + '|' + (kind === 'Contact' ? 'contacts' : 'leads') + ':' + rec.Id).slice(0, 255);
-    return items('CRM Activities', "$select=Id&$top=1&$filter=ExternalId eq '" + esc(ext) + "'").then(function (found) {
+    return items('BrillCRM_Activities', "$select=Id&$top=1&$filter=ExternalId eq '" + esc(ext) + "'").then(function (found) {
       if (found.length) { return 'already'; }
       return bodyText().then(function (text) {
-        return sp("/_api/web/lists/getbytitle('CRM Activities')/items", 'POST', {
+        return sp("/_api/web/lists/getbytitle('BrillCRM_Activities')/items", 'POST', {
           Title: ('Received: ' + (s.subject || '(no subject)')).slice(0, 255), ActivityType: 'Email', RelatedType: kind, RelatedId: rec.Id,
           Completed: true, DueDate: new Date().toISOString(), ActivitySource: 'Outlook', ExternalId: ext,
           Details: ('From: ' + s.name + ' <' + s.email + '>\n\n' + text).slice(0, 60000)
@@ -107,7 +107,7 @@
     var domain = s.email.split('@')[1] || '';
     var business = domain && FREE.indexOf(domain) < 0;
     var company = business ? domain.split('.')[0].charAt(0).toUpperCase() + domain.split('.')[0].slice(1) : '';
-    return sp("/_api/web/lists/getbytitle('AppSource Leads')/items", 'POST', {
+    return sp("/_api/web/lists/getbytitle('BrillCRM_Leads')/items", 'POST', {
       Title: s.name || s.email, FirstName: parts[0], LastName: parts.slice(1).join(' '), Email: s.email, Company: company,
       Website: business ? 'https://' + domain : '', LeadSource: 'Other', Status: 'New', Rating: 'Warm', EnrichStatus: business ? 'Requested' : null,
       Description: 'Created from Outlook: ' + s.subject
@@ -122,7 +122,7 @@
     if (!s.email) { show([msg('Open an email to see the sender in the CRM.')]); return; }
     show([msg('Looking up ' + s.email + '…')]);
     var sel = '$select=Id,Title,Email,JobTitle,Company,AccountRef,Status,Phone&$top=1&$filter=Email eq \'' + esc(s.email) + '\'';
-    Promise.all([items('CRM Contacts', sel.replace(',Company', '').replace(',Status', '')), items('AppSource Leads', sel.replace(',AccountRef', ''))]).then(function (r) {
+    Promise.all([items('BrillCRM_Contacts', sel.replace(',Company', '').replace(',Status', '')), items('BrillCRM_Leads', sel.replace(',AccountRef', ''))]).then(function (r) {
       var contact = r[0][0], lead = r[1][0];
       var rec = contact || lead, kind = contact ? 'Contact' : 'Lead';
       var status = msg('');
@@ -154,8 +154,8 @@
         ]), status, lists]));
       if (kind !== 'Contact') { lists.innerHTML = ''; return; }
       Promise.all([
-        items('CRM Opportunities', "$select=Id,Title,Stage,Amount,Currency,ExpectedCloseDate&$top=5&$orderby=Modified desc&$filter=ContactRef eq " + rec.Id),
-        items('CRM Cases', "$select=Id,Title,CaseNumber,CaseStatus&$top=5&$orderby=Modified desc&$filter=ContactRef eq " + rec.Id)
+        items('BrillCRM_Opportunities', "$select=Id,Title,Stage,Amount,Currency,ExpectedCloseDate&$top=5&$orderby=Modified desc&$filter=ContactRef eq " + rec.Id),
+        items('BrillCRM_Cases', "$select=Id,Title,CaseNumber,CaseStatus&$top=5&$orderby=Modified desc&$filter=ContactRef eq " + rec.Id)
       ]).then(function (x) {
         var opps = x[0].filter(function (o) { return !/^Closed/.test(o.Stage || ''); });
         var cases = x[1].filter(function (c) { return c.CaseStatus !== 'Closed' && c.CaseStatus !== 'Resolved'; });

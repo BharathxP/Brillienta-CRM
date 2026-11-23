@@ -64,7 +64,7 @@ Upgrading from 2.x: deploy the `.sppkg`, click **Update lists** (adds the new co
 * **Email marketing:** campaign emails to consented leads and contacts with a personal unsubscribe page, or export the audience to Mailchimp / Brevo.
 * **Inbound REST API** (create / upsert / get) for other systems, plus a **Power BI** connection guide.
 
-Upgrading from 2.1: deploy the `.sppkg`, click **Update lists** (adds the `CRM Knowledge Base` list and new columns), then re-import the flow pack (1.5, 20 flows).
+Upgrading from 2.1: deploy the `.sppkg`, click **Update lists** (adds the `BrillCRM_KnowledgeBase` list and new columns), then re-import the flow pack (1.5, 20 flows).
 
 ## What's new in 2.1
 
@@ -133,7 +133,7 @@ Upgrading from 2.0: deploy the new `.sppkg`, open the CRM as an administrator an
 src/webparts/brillientaCrm/
   BrillientaCrmWebPart.ts       web part, property pane
   models/model.ts               entity metadata: every module is defined here (fields, relations, board field)
-  models/settings.ts            tenant settings (stored as JSON in the "CRM Settings" list)
+  models/settings.ts            tenant settings (stored as JSON in the "BrillCRM_Settings" list)
   models/license.ts             ECDSA P-256 licence verification
   services/SpRest.ts            SharePoint REST client
   services/DataService.ts       provisioning, CRUD mapping, audit, roles, permissions
@@ -167,7 +167,7 @@ tools/license/                  key generation and licence issuing (vendor-only,
 
 Every list, form, grid, board, filter, import and export is generated from `models/model.ts`. To add a module, add an entity definition there.
 
-**Lists created by Setup:** `AppSource Leads`, `CRM Accounts`, `CRM Contacts`, `CRM Opportunities`, `CRM Quotes`, `CRM Products`, `CRM Demo Requests`, `CRM Cases`, `CRM Campaigns`, `CRM Subscriptions`, `CRM Invoices`, `CRM Knowledge Base`, `CRM Activities`, `CRM Settings`, `CRM Audit Log`. You can rename any of them per site in the web part properties. Version 1 data is upgraded in place, because Setup only adds the missing columns.
+**Lists created by Setup:** `BrillCRM_Leads`, `BrillCRM_Accounts`, `BrillCRM_Contacts`, `BrillCRM_Opportunities`, `BrillCRM_Quotes`, `BrillCRM_Products`, `BrillCRM_DemoRequests`, `BrillCRM_Cases`, `BrillCRM_Campaigns`, `BrillCRM_Subscriptions`, `BrillCRM_Invoices`, `BrillCRM_KnowledgeBase`, `BrillCRM_Activities`, `BrillCRM_Settings`, `BrillCRM_AuditLog`. You can rename any of them per site in the web part properties. Version 1 data is upgraded in place, because Setup only adds the missing columns.
 
 ## Build
 
@@ -224,7 +224,7 @@ Tools live in `src/copilotComponents/<tool>/`. The tool name and the description
 
 ## AppSource leads → CRM
 
-In Partner Center, go to your offer › *Customer leads* › **HTTPS endpoint**. Point it at a Power Automate flow: trigger *When an HTTP request is received* → action *SharePoint: Create item* in `AppSource Leads`.
+In Partner Center, go to your offer › *Customer leads* › **HTTPS endpoint**. Point it at a Power Automate flow: trigger *When an HTTP request is received* → action *SharePoint: Create item* in `BrillCRM_Leads`.
 
 Map the fields as follows:
 
@@ -243,7 +243,7 @@ The CRM runs as a **Teams personal app** (left rail) and as a **channel tab**, a
 
 1. **One CRM for everyone, found automatically:** Teams tabs run on the team's own site and the personal app runs on the root site, so the CRM finds its data by itself, in this order:
    * the site the tab runs on, if it has the CRM lists;
-   * otherwise SharePoint Search finds the `CRM Opportunities` list the person can read. Nothing to set up and no admin rights or PowerShell needed. A brand-new CRM site appears in search within minutes to a few hours.
+   * otherwise SharePoint Search finds the `BrillCRM_Opportunities` list the person can read. Nothing to set up and no admin rights or PowerShell needed. A brand-new CRM site appears in search within minutes to a few hours.
 
    *Settings › Microsoft Teams › Main CRM site* shows whether search already finds the CRM. **Optional:** when a tenant has more than one CRM, a SharePoint admin can pin one for everyone with **Pin this site** (needs app catalog admin rights) or `Set-PnPStorageEntity -Key "BrillientaCRM.SiteUrl" -Value "https://contoso.sharepoint.com/sites/crm" -Scope Tenant`. A pinned site always wins.
 2. **Publish to Teams:** in the App Catalog, select *Brillienta CRM* › **Sync to Teams**. The solution includes a branded Teams app package (`teams/TeamsSPFxApp.zip`). The Copilot agent is a separate package with its own Sync to Teams (see [Microsoft 365 Copilot](#microsoft-365-copilot)).

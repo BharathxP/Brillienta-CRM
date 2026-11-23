@@ -6,9 +6,9 @@
 
 | Flow | Trigger | What it does | Licence |
 |---|---|---|---|
-| **AppSource lead intake** | HTTP request (Partner Center → *Customer leads* → HTTPS endpoint) | Creates the lead in `AppSource Leads` (source AppSource or Azure Marketplace, status New, raw payload kept) and always answers HTTP 200 | **Premium** |
+| **AppSource lead intake** | HTTP request (Partner Center → *Customer leads* → HTTPS endpoint) | Creates the lead in `BrillCRM_Leads` (source AppSource or Azure Marketplace, status New, raw payload kept) and always answers HTTP 200 | **Premium** |
 | **Website leads & demo bookings** | brillienta.com `api/lead.js` sends every validated lead (`CRM_WEBHOOK_URL`) | **Demo booking:** Hot lead + demo request (products, requested slot in UTC and the visitor's time zone, length) + email to sales. **Support request** (Issue, Feature request, How-to, Licence & billing, Security): **case** with the `BR-…` reference, priority from the visitor's impact (the CRM sets the business-hours SLA deadlines), linked to the contact if the email matches, + email to support. **Other enquiry:** lead. Keeps UTM, landing page and referrer. Checks the `x-lead-key` header | **Premium** |
-| **New lead alert** | New item in `AppSource Leads` | Emails the lead owner. Unassigned leads go to the sales manager | Standard |
+| **New lead alert** | New item in `BrillCRM_Leads` | Emails the lead owner. Unassigned leads go to the sales manager | Standard |
 | **Daily sales digest** | Weekdays 07:00 UTC | New leads, deals won (last 24 h), deals closing in 7 days and overdue tasks, sent to the sales manager | Standard |
 | **Overdue reminders** | Weekdays 06:00 UTC | **One email per person** listing their overdue tasks and lead follow-ups | Standard |
 | **Case SLA escalation** | Every hour | Cases that breached their SLA in the last hour go to the support manager, with the case owner in Cc (high importance) | Standard |
@@ -68,8 +68,8 @@ The CRM enforces the approval step. A quote whose total discount is above **Sett
 ## Notes and requirements
 
 * **Schedules are in UTC.** To use local time, open the flow, edit the *Recurrence* trigger and set your time zone.
-* **Deal won handoff** uses *Get changes for an item* to fire only at the moment the stage *changes* to Closed Won. That needs **version history** on `CRM Opportunities`, which SharePoint lists have on by default.
-* **Renamed lists:** the flows use the default list names (`AppSource Leads`, `CRM Opportunities`, …). If a site renamed a list in the web part properties, change the list name in the affected flow actions.
+* **Deal won handoff** uses *Get changes for an item* to fire only at the moment the stage *changes* to Closed Won. That needs **version history** on `BrillCRM_Opportunities`, which SharePoint lists have on by default.
+* **Renamed lists:** the flows use the default list names (`BrillCRM_Leads`, `BrillCRM_Opportunities`, …). If a site renamed a list in the web part properties, change the list name in the affected flow actions.
 * **Licensing:** flows that use HTTP (AppSource, website, e-signature, payments, WhatsApp) need **Power Automate Premium** for the connection owner. Everything else runs on standard Microsoft 365 licences.
 * **Webhook security:** Power Automate can't check HMAC signatures, so the payment flows **re-read the payment from the provider's API** before marking an invoice paid. WhatsApp inbound only accepts events for your phone number ID. The e-signature link is a random 48-character, single-use token that expires with the quote.
 * **SLAs:** cases created by flows get their SLA deadlines from the CRM, in business hours, the next time someone in support or a manager opens it.
