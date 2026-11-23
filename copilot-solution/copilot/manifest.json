@@ -1,7 +1,7 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.29/MicrosoftTeams.schema.json",
   "manifestVersion": "1.29",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "id": "28c3151c-8e2a-4046-a01f-67544b604f58",
   "developer": {
     "name": "Brillienta",

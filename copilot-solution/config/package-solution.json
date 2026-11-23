@@ -3,7 +3,7 @@
   "solution": {
     "name": "Brillienta CRM Copilot",
     "id": "cae62943-18ff-4be2-9116-96c06a7fd7a9",
-    "version": "1.0.1.0",
+    "version": "1.0.2.0",
     "includeClientSideAssets": true,
     "skipFeatureDeployment": true,
     "isDomainIsolated": false,

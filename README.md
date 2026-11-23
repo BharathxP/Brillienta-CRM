@@ -118,7 +118,7 @@ Upgrading from 2.0: deploy the new `.sppkg`, open the CRM as an administrator an
 
 ## Enterprise features
 
-* **Role-based access** through SharePoint groups: Administrators, Sales managers, Sales, Support, Readers. Setting them up creates the groups and grants list permissions. You can optionally restrict reps to their own records.
+* **Role-based access** through SharePoint groups: `BrillCRM_Administrators`, `BrillCRM_SalesManagers`, `BrillCRM_Sales`, `BrillCRM_Support` and `BrillCRM_Readers` (names can be changed in *Settings › Security*). Setting them up creates the groups and grants list permissions. You can optionally restrict reps to their own records.
 * **Audit log** of who changed which field, when, and from what to what. It's shown on every record and on an admin page.
 * **Duplicate merge**, with references and timelines moved to the surviving record.
 * **Privacy / GDPR:** export everything held about a person as JSON, erase personal data (record, timeline, copies on deals, demos, cases and quotes, plus the audit history), unsubscribe flags, and consent changes logged automatically.

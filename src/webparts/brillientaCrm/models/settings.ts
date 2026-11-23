@@ -293,7 +293,7 @@ export function defaultSettings(): ICrmSettings {
     payments: { provider: 'none' },
     accounting: { tallySalesLedger: 'Sales', tallyTaxLedger: 'Output GST', xeroSalesAccount: '200', xeroTaxType: 'OUTPUT' },
     security: { itemLevel: false, teamAccess: 'read' },
-    groups: { admins: 'CRM Administrators', managers: 'CRM Sales Managers', sales: 'CRM Sales', support: 'CRM Support', readers: 'CRM Readers' }
+    groups: { admins: 'BrillCRM_Administrators', managers: 'BrillCRM_SalesManagers', sales: 'BrillCRM_Sales', support: 'BrillCRM_Support', readers: 'BrillCRM_Readers' }
   };
 }
 

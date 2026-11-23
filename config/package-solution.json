@@ -3,7 +3,7 @@
   "solution": {
     "name": "Brillienta CRM",
     "id": "781af369-4ca4-48a6-86fc-9f40d5ce4d25",
-    "version": "3.5.4.0",
+    "version": "3.5.5.0",
     "includeClientSideAssets": true,
     "skipFeatureDeployment": true,
     "developer": {
