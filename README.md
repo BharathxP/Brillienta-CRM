@@ -180,6 +180,28 @@ npm run build:copilot  # only the Copilot package
 npm start            # local dev server for the hosted workbench
 ```
 
+### Testing
+
+```bash
+npm run build        # unit tests (Jest) run as part of the build
+npm run e2e          # end-to-end journeys in a browser (Playwright)
+npm run preview      # the CRM in your browser without SharePoint: open preview-dist/index.html
+```
+
+`npm run e2e` drives the real CRM in a local preview whose SharePoint is in memory (`preview/fakeSharePoint.js`).
+The fake is strict where SharePoint is: an unknown column, list or `$select` is an error, text columns take 255
+characters, readers cannot write, and records with their own permissions are hidden from people they are not shared
+with. 16 journeys cover setup, products, leads (score, duplicates), conversion, the pipeline (won/lost, drag and drop),
+quote to cash (line items, discount approval, accept, subscriptions, invoices, part and full payment), cases and SLAs,
+tasks, security groups and every role, record-level security, settings, search, audit log, CSV import and export,
+custom fields, renewals and overdue invoices, the knowledge base, campaigns, the demo-request form, GDPR erasure,
+duplicate merge, every page for every role, phone width and dark theme. It prints PASS/FAIL per check and saves
+screenshots to `tests/e2e/output/`.
+
+In the preview, `?as=asha|ben|chen|maya|dana|eli` signs in as an administrator, sales manager, sales reps, support or
+reader, `?reset=1` starts from an empty site, `?page=entity:leads` opens a page, `?dark=1` uses the dark theme and
+`?mode=demoForm` shows the public demo-request form.
+
 ## Install at a customer
 
 1. Upload `brillienta-crm.sppkg` to the **App Catalog** and click **Deploy**.

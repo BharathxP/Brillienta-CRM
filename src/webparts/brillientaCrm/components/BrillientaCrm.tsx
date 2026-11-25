@@ -264,7 +264,14 @@ const BrillientaCrm: React.FC<IBrillientaCrmProps> = props => {
   }, [phase]);
 
   const updateSettings = async (s: ICrmSettings): Promise<void> => {
+    const before = engine.settings.customFields.map(c => `${c.entity}/${c.key}`);
     await engine.ds.saveSettings(s);
+    // New custom fields need their SharePoint columns straight away: otherwise the next time anyone opens the CRM a
+    // column is "missing" and everyone lands on the setup screen. Only administrators save settings, and they can.
+    if (s.customFields.some(c => before.indexOf(`${c.entity}/${c.key}`) < 0)) {
+      await engine.ds.provision();
+      setStatuses(await engine.ds.checkLists());
+    }
     const license = await evaluateLicense(s.licenseKey, props.tenantId, s.installDate);
     engine.setSession(engine.me, engine.role, license);
     setSettings(s);

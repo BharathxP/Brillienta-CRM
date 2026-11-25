@@ -8,6 +8,8 @@
   "scripts": {
     "build": "node teams-app/build-teams-app.mjs && node flows/build-solution.mjs && heft test --clean --production && heft package-solution --production && npm run build:copilot",
     "build:copilot": "node copilot-solution/build.mjs",
+    "preview": "heft build --clean && node preview/build.mjs",
+    "e2e": "heft build --clean && node preview/build.mjs && node tests/e2e/run.cjs",
     "clean": "heft clean",
     "eject-webpack": "heft eject-webpack",
     "start": "heft start --clean",
@@ -41,6 +43,7 @@
     "@types/react-dom": "18.2.25",
     "@types/webpack-env": "~1.15.2",
     "css-loader": "~7.1.2",
+    "esbuild": "0.25.9",
     "eslint": "9.37.0",
     "eslint-plugin-react-hooks": "5.2.0",
     "typescript": "~5.8.0"

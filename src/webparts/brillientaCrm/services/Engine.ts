@@ -731,7 +731,12 @@ export class Engine {
         await this.patch('subscriptions', s.id!, { renewalDate: next });
         res.rolled++;
       } else if (r.autoCreateOpportunities && s.billingCycle !== 'Monthly' && due - now <= r.leadDays * DAY) {
-        const exists = (this.data.opportunities || []).some(o => o.subscriptionRef === s.id && o.dealType === 'Renewal' && dayKey(o.expectedCloseDate) === dayKey(s.renewalDate));
+        // One renewal deal per renewal: an open one for this subscription (even if its close date was moved), or one
+        // closed around this renewal date. A won renewal moves the renewal date a year on, so the next one is created.
+        const open = this.openStages();
+        const exists = (this.data.opportunities || []).some(o => o.subscriptionRef === s.id && o.dealType === 'Renewal' && (
+          open.indexOf(o.stage) >= 0 || dayKey(o.expectedCloseDate) === dayKey(s.renewalDate) ||
+          (!!o.expectedCloseDate && Math.abs(new Date(o.expectedCloseDate).getTime() - due) < 90 * DAY)));
         if (exists) { continue; }
         const stages = this.openStages();
         await this.save('opportunities', {
@@ -1039,6 +1044,12 @@ export class Engine {
       }
     });
     Object.assign(wipe, { title: label, firstName: 'Erased', lastName: `#${r.id}`, marketingConsent: false, unsubscribed: true, tags: [] });
+    // An erased person must not be followed up any more: no next-best-action, reminder or sequence step.
+    if (key === 'leads' && r.status !== 'Converted') { wipe.status = 'Unqualified'; }
+    if (key === 'leads' || key === 'contacts') {
+      wipe.nextFollowUp = undefined;
+      if (r.sequenceStatus === 'Active') { Object.assign(wipe, { sequenceStatus: 'Stopped', sequenceNextDue: undefined }); }
+    }
     let n = 0;
     await this.ds.save(key, { id: r.id, ...wipe });
     n++;

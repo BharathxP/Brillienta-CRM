@@ -44,3 +44,6 @@ tools/license/keys/
 teams/*.zip
 !teams/TeamsSPFxApp.zip
 teams/.copilot-agent-hotfix.json
+
+# Local preview build and end-to-end test output (npm run preview / npm run e2e)
+preview-dist/

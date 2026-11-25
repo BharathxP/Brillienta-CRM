@@ -62,7 +62,10 @@ export const DemoRequestForm: React.FC<IProps> = ({ engine, title, intro, produc
       setF(EMPTY);
       setTouched(false);
     } catch (e) {
-      setError(errorText(e));
+      const status = (e as { status?: number }).status;
+      setError(status === 401 || status === 403
+        ? 'Your request could not be sent because you do not have permission to add items on this site. Please contact the site owner, or use the contact details on our website.'
+        : errorText(e));
     } finally {
       setBusy(false);
     }
