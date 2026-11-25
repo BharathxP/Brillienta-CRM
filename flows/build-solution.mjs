@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const VERSION = '2.0.1.0';
+const VERSION = '2.0.2.0';
 const SOLUTION = 'BrillientaCRMFlows';
 const PREFIX = 'bri';
 
@@ -1135,6 +1135,99 @@ flow('Brillienta CRM - Inbound API',
     }
   });
 
+
+// Paddle billing uses its own list so regular CRM writes cannot bypass ETags.
+const billingItems = "_api/web/lists/getbytitle('BrillCRM_PaddleBilling')/items";
+const billingKey = (name) => `@{encodeUriComponent(replace(string(${B(name)}), '''', ''''''))}`;
+const billingFields = {
+  Title: `@${B('key')}`,
+  BillingEventAt: `@${B('eventAt')}`,
+  BillingPayload: `@${B('data')}`,
+  BillingCustomerId: "@coalesce(triggerBody()?['customerId'], '')",
+};
+const billingStoreError = (after) => jsonResponse(502, { code: 'billing_store_unavailable' }, after);
+const billingActions = {
+  Billing_route: {
+    runAfter: {}, type: 'Switch', expression: `@${B('action')}`,
+    cases: {
+      Billing_read: {
+        case: 'billingget', actions: {
+          Billing_find: spHttp('GET', `${billingItems}?$top=1&$select=Id,Title,BillingEventAt,BillingPayload&$filter=Title eq '${billingKey('key')}'`,
+            undefined, {}, { Accept: 'application/json;odata=verbose' }),
+          Billing_find_failed: billingStoreError({ Billing_find: ['Failed', 'TimedOut'] }),
+          Billing_found: {
+            runAfter: { Billing_find: ['Succeeded'] }, type: 'If',
+            expression: "@not(empty(body('Billing_find')?['d']?['results']))",
+            actions: {
+              Billing_item: { runAfter: {}, type: 'Compose', inputs: "@first(body('Billing_find')?['d']?['results'])" },
+              Billing_record: jsonResponse(200, {
+                key: "@outputs('Billing_item')?['Title']",
+                id: "@outputs('Billing_item')?['Id']",
+                etag: "@outputs('Billing_item')?['__metadata']?['etag']",
+                eventAt: "@outputs('Billing_item')?['BillingEventAt']",
+                data: "@outputs('Billing_item')?['BillingPayload']",
+              }, { Billing_item: ['Succeeded'] }),
+            },
+            else: { actions: { Billing_missing: jsonResponse(404, { code: 'billing_record_missing' }) } },
+          },
+        },
+      },
+      Billing_subscriptions: {
+        case: 'billingsubscriptions', actions: {
+          Billing_find_subscriptions: spHttp('GET', `${billingItems}?$top=100&$orderby=Id desc&$select=BillingPayload&$filter=BillingCustomerId eq '${billingKey('customerId')}'`),
+          Billing_subscription_records: jsonResponse(200, { subscriptions: "@body('Billing_find_subscriptions')?['value']" }, { Billing_find_subscriptions: ['Succeeded'] }),
+          Billing_subscription_find_failed: billingStoreError({ Billing_find_subscriptions: ['Failed', 'TimedOut'] }),
+        },
+      },
+      Billing_write: {
+        case: 'billingput', actions: {
+          Billing_is_update: {
+            runAfter: {}, type: 'If', expression: "@not(equals(triggerBody()?['itemId'], null))",
+            actions: {
+              Billing_valid_version: {
+                runAfter: {}, type: 'If',
+                expression: "@and(not(empty(triggerBody()?['etag'])), not(equals(triggerBody()?['etag'], '*')))",
+                actions: {
+                  Billing_update: spHttp('POST', `${billingItems}(@{int(${B('itemId')})})`, billingFields, {}, { 'X-HTTP-Method': 'MERGE', 'IF-MATCH': `@${B('etag')}` }),
+                  Billing_updated: jsonResponse(200, { saved: true }, { Billing_update: ['Succeeded'] }),
+                  Billing_update_failed: {
+                    runAfter: { Billing_update: ['Failed', 'TimedOut'] }, type: 'If',
+                    expression: "@equals(outputs('Billing_update')?['statusCode'], 412)",
+                    actions: { Billing_changed: jsonResponse(409, { code: 'billing_record_changed' }) },
+                    else: { actions: { Billing_update_unavailable: billingStoreError({}) } },
+                  },
+                },
+                else: { actions: { Billing_bad_version: jsonResponse(400, { code: 'billing_version_required' }) } },
+              },
+            },
+            else: {
+              actions: {
+                Billing_create: spHttp('POST', billingItems, billingFields),
+                Billing_created: jsonResponse(201, { saved: true }, { Billing_create: ['Succeeded'] }),
+                // A unique Title makes concurrent creates safe. The caller re-reads on conflict.
+                Billing_create_failed: {
+                  runAfter: { Billing_create: ['Failed', 'TimedOut'] }, type: 'If',
+                  expression: "@or(equals(outputs('Billing_create')?['statusCode'], 400), equals(outputs('Billing_create')?['statusCode'], 409))",
+                  actions: { Billing_create_conflict: jsonResponse(409, { code: 'billing_create_conflict' }) },
+                  else: { actions: { Billing_create_unavailable: billingStoreError({}) } },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    default: { actions: { Billing_bad_action: jsonResponse(400, { code: 'unknown_billing_action' }) } },
+  },
+};
+const inbound = FLOWS.at(-1).actions.Authorised;
+inbound.actions = {
+  Route_entity: {
+    runAfter: {}, type: 'If', expression: "@equals(triggerBody()?['entity'], 'paddlebilling')",
+    actions: billingActions,
+    else: { actions: inbound.actions },
+  },
+};
 
 // 20 — Record security (item-level permissions by owner and team)
 const SEC_LISTS = [
