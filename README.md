@@ -2,6 +2,21 @@
 
 A complete CRM delivered as one SharePoint Framework (SPFx 1.24) web part. All data is stored in SharePoint lists **in the customer's own Microsoft 365 tenant**. There is no external database or server.
 
+## What's new in 3.5.6 (Copilot add-on 1.0.3)
+
+* **Ready for the Microsoft Marketplace / SharePoint Store** (both packages): Microsoft Partner ID, product website
+  https://brillienta.com/crm, privacy and terms links, the app icon, store screenshots (five for the CRM, four for the
+  Copilot add-on), current short and long descriptions ending with *Get started*, *Help* and *Contact us* links, and the
+  app icon (not a font icon) in the web part picker. `publication.test.ts` checks these on every build.
+* **End-to-end tests** (`npm run e2e`): 16 journeys, 96 checks, in a browser against an in-memory SharePoint. See *Testing*.
+* Fixed: adding a custom field saved the setting but not its SharePoint column, so everyone was sent to the setup screen
+  the next time they opened the CRM. The column is now created when the settings are saved.
+* Fixed: a renewal opportunity was created again on each maintenance run once its close date had been moved.
+* Fixed: a lead erased for GDPR stayed *New* and kept appearing in next best actions; it is now *Unqualified* and its
+  follow-ups and sequence stop.
+* Fixed: quote line items no longer need a sideways scroll in the record panel (the Total column was cut off).
+* The demo-request form explains a permissions problem in plain words instead of showing SharePoint's error.
+
 ## What's new in 3.5
 
 * **Brillienta CRM in Microsoft 365 Copilot** (SPFx 1.24 Copilot Components). A second SharePoint package, **`brillienta-crm-copilot.sppkg`**, adds a Copilot agent, **Brillienta CRM**, whose six tools render live CRM data as interactive cards in the Copilot chat:
@@ -198,9 +213,20 @@ custom fields, renewals and overdue invoices, the knowledge base, campaigns, the
 duplicate merge, every page for every role, phone width and dark theme. It prints PASS/FAIL per check and saves
 screenshots to `tests/e2e/output/`.
 
+`preview-dist/copilot.html?tool=pipeline|account|renewals|invoices|cases|lead` shows the Copilot cards with the same data.
+
 In the preview, `?as=asha|ben|chen|maya|dana|eli` signs in as an administrator, sales manager, sales reps, support or
 reader, `?reset=1` starts from an empty site, `?page=entity:leads` opens a page, `?dark=1` uses the dark theme and
 `?mode=demoForm` shows the public demo-request form.
+
+### Store listing
+
+Package details for the Microsoft Marketplace / SharePoint Store are in `config/package-solution.json` (CRM) and
+`copilot-solution/config/package-solution.json` (Copilot add-on): Partner ID, website, privacy and terms, the app icon
+(`sharepoint/images/AppIcon.png`, 96 × 96), screenshots, categories and descriptions. `npm run store:screenshots`
+re-creates the 1366 × 768 screenshots from the preview with a realistic sample CRM (`preview/demoData.js`):
+`sharepoint/images/screenshot-1..5.png` (dashboard, pipeline, a deal, a quote, forecast) and
+`copilot-solution/images/screenshot-1..4.png` (pipeline, account summary, new lead and SLA cards).
 
 ## Install at a customer
 
@@ -305,6 +331,7 @@ The licence check runs in the browser. A determined tenant admin could bypass it
 
 ## Before you submit to AppSource
 
-* In `config/package-solution.json`, fill in `developer.name`, `websiteUrl`, `privacyUrl`, `termsOfUseUrl` and `mpnId`, and add screenshots.
+* The package details are filled in for both packages (see *Store listing*); `publication.test.ts` fails the build if one is missing or over a limit. Check that https://brillienta.com/crm, https://brillienta.com/guides/crm/ and https://brillienta.com/contact are live before submitting.
+* Submit the two packages as two offers (or one offer per package): `brillienta-crm.sppkg` and the optional `brillienta-crm-copilot.sppkg`.
 * In Partner Center, answer *"My product requires purchase of a service or offers in-app purchases"*. Under *Notes for certification*, explain how testers get a licence key, or point out that the 30-day trial works without one.
-* Increase `version` in `package-solution.json` for every submission.
+* Increase `version` in `package-solution.json` (and the feature version) for every submission; for the Copilot add-on also `copilot-solution/copilot/manifest.json`.

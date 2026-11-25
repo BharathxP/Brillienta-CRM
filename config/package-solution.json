@@ -3,24 +3,30 @@
   "solution": {
     "name": "Brillienta CRM",
     "id": "781af369-4ca4-48a6-86fc-9f40d5ce4d25",
-    "version": "3.5.5.0",
+    "version": "3.5.6.0",
     "includeClientSideAssets": true,
     "skipFeatureDeployment": true,
     "developer": {
       "name": "Brillienta",
-      "websiteUrl": "https://brillienta.com",
+      "websiteUrl": "https://brillienta.com/crm",
       "privacyUrl": "https://brillienta.com/privacy",
       "termsOfUseUrl": "https://brillienta.com/terms",
-      "mpnId": "Undefined-1.24.1"
+      "mpnId": "7194411"
     },
     "metadata": {
       "shortDescription": {
-        "default": "Enterprise CRM inside SharePoint & Teams: leads, accounts, deals, quotes, demos, cases, forecasting."
+        "default": "CRM for SharePoint and Teams: leads, deals, quotes, invoices, cases, forecasts."
       },
       "longDescription": {
-        "default": "Brillienta CRM is a complete CRM that runs inside Microsoft 365 and stores all data in your own SharePoint site. Sales: leads with scoring and round-robin assignment, accounts, contacts, opportunities with a drag-and-drop pipeline, products and branded quotes. Marketing: demo requests with Teams meeting scheduling, campaigns with ROI. Service: cases with SLA tracking. Insights: dashboards, forecasting with quotas, reports and a calendar. Integrations: Outlook email, Teams meetings and channel notifications, Microsoft AppSource / Partner Center leads, Power Automate and webhooks, CSV import/export. Enterprise: role-based security, audit log, custom fields."
+        "default": "Brillienta CRM is a complete CRM that runs inside SharePoint Online and Microsoft Teams. All data stays in SharePoint lists on your own site, protected by your Microsoft 365 permissions. Sales: leads with scoring, duplicate checks and round-robin assignment; accounts and contacts with a 360 view; a drag-and-drop pipeline with AI deal health; forecasting against quotas; products, price books and branded quotes with discount approval and e-signature. Billing: subscriptions with MRR and ARR and automatic renewal opportunities, invoices with Razorpay or Stripe payment links, and export to Zoho Books, QuickBooks, Xero and Tally. Marketing: demo requests with Teams meetings, campaigns with ROI, email campaigns and follow-up sequences. Service: cases with business-hours SLAs, a knowledge base, a customer portal and satisfaction surveys. Also included: Outlook email and automatic logging, Teams channel alerts, WhatsApp, a Power Automate flow pack, webhooks and an inbound API, Power BI, CSV import and export, role-based and record-level security, an audit log and GDPR tools. The optional Brillienta CRM Copilot add-on shows your pipeline, accounts, renewals, overdue invoices and SLA risks in Microsoft 365 Copilot. Includes a 30-day free trial of every feature; after the trial a licence key from Brillienta is required (Standard or Enterprise). Microsoft Graph permissions: Mail.Send, Mail.Read and Calendars.ReadWrite are used only for Outlook email, Outlook logging and Teams meetings, and User.ReadBasic.All for people search; the CRM works without them. Get started: start your free 30-day trial at https://brillienta.com/crm. Help: read the product guide at https://brillienta.com/guides/crm/. Contact us: https://brillienta.com/contact or support@brillienta.com."
       },
-      "screenshotPaths": [],
+      "screenshotPaths": [
+        "images/screenshot-1.png",
+        "images/screenshot-2.png",
+        "images/screenshot-3.png",
+        "images/screenshot-4.png",
+        "images/screenshot-5.png"
+      ],
       "videoUrl": "",
       "categories": [
         "CRM",
@@ -30,10 +36,10 @@
     },
     "features": [
       {
-        "title": "Brillienta CRM Feature",
-        "description": "Deploys the Brillienta CRM web parts.",
+        "title": "Brillienta CRM",
+        "description": "Activates the Brillienta CRM web part (SharePoint pages, Teams personal app and channel tab).",
         "id": "f9fc8365-dd9e-47b7-a0d8-1fdcb4088be1",
-        "version": "1.0.0.0"
+        "version": "3.5.6.0"
       }
     ],
     "webApiPermissionRequests": [

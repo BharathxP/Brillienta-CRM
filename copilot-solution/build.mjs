@@ -23,7 +23,10 @@ mkdirSync(join(STAGE, 'config'), { recursive: true });
 // Project files shared with the CRM.
 for (const f of ['package.json', 'tsconfig.json', 'eslint.config.js']) { copyFileSync(join(ROOT, f), join(STAGE, f)); }
 cpSync(join(ROOT, 'src'), join(STAGE, 'src'), { recursive: true });
-cpSync(join(ROOT, 'sharepoint', 'images'), join(STAGE, 'sharepoint', 'images'), { recursive: true });
+// Store images: the app icon (shared with the CRM) and this package's own screenshots (images/screenshot-*.png).
+mkdirSync(join(STAGE, 'sharepoint', 'images'), { recursive: true });
+copyFileSync(join(ROOT, 'sharepoint', 'images', 'AppIcon.png'), join(STAGE, 'sharepoint', 'images', 'AppIcon.png'));
+cpSync(join(HERE, 'images'), join(STAGE, 'sharepoint', 'images'), { recursive: true });
 symlinkSync(join(ROOT, 'node_modules'), join(STAGE, 'node_modules'), 'dir');
 
 // Build config: the CRM's, with this package's bundle, solution and agent instead.

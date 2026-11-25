@@ -247,7 +247,7 @@
     .crm-act-icon { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; min-width: 32px; border-radius: 50%; background: var(--crm-accent-soft); color: var(--crm-accent); }
 
     .crm-lines { display: flex; flex-direction: column; gap: 6px; overflow-x: auto; }
-    .crm-lines-head, .crm-lines-row { display: grid; grid-template-columns: minmax(180px, 2.4fr) 70px 110px 70px 70px 100px 32px; gap: 6px; align-items: center; min-width: 660px; }
+    .crm-lines-head, .crm-lines-row { display: grid; grid-template-columns: minmax(140px, 2.4fr) 60px 92px 56px 56px minmax(84px, 1fr) 32px; gap: 6px; align-items: center; min-width: 560px; }
     .crm-lines-head { font-size: 12px; font-weight: 600; color: var(--crm-subtle); }
     .crm-num { text-align: right; font-variant-numeric: tabular-nums; }
     .crm-import-map { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; max-height: 300px; overflow-y: auto; align-items: center; }

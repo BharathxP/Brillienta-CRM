@@ -399,3 +399,17 @@ export function patchItem(title, id, fields) {
   save();
   return row;
 }
+
+/** Adds rows to a list as if created by `authorId` (the demo data uses it). Returns the new ids. */
+export function seedItems(title, rows, authorId = 7) {
+  const list = state.lists[title];
+  if (!list) { throw new Error(`No list ${title}`); }
+  const ids = rows.map((r) => {
+    const row = { Id: state.nextItem++, Created: r.Created || nowIso(), Modified: nowIso(), AuthorId: authorId, EditorId: authorId, ...r };
+    list.items.push(row);
+    return row.Id;
+  });
+  list.modified = nowIso();
+  save();
+  return ids;
+}

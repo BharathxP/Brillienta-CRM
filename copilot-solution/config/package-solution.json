@@ -3,37 +3,43 @@
   "solution": {
     "name": "Brillienta CRM Copilot",
     "id": "cae62943-18ff-4be2-9116-96c06a7fd7a9",
-    "version": "1.0.2.0",
+    "version": "1.0.3.0",
     "includeClientSideAssets": true,
     "skipFeatureDeployment": true,
     "isDomainIsolated": false,
     "developer": {
       "name": "Brillienta",
-      "websiteUrl": "https://brillienta.com",
+      "websiteUrl": "https://brillienta.com/crm",
       "privacyUrl": "https://brillienta.com/privacy",
       "termsOfUseUrl": "https://brillienta.com/terms",
-      "mpnId": "Undefined-1.24.1"
+      "mpnId": "7194411"
     },
     "metadata": {
       "shortDescription": {
-        "default": "Brillienta CRM in Microsoft 365 Copilot: pipeline, accounts, renewals, invoices, cases and new leads."
+        "default": "Brillienta CRM in Microsoft 365 Copilot: pipeline, accounts, renewals and leads."
       },
       "longDescription": {
-        "default": "Adds the Brillienta CRM agent to Microsoft 365 Copilot. Six tools show live CRM data as interactive cards: your pipeline with AI deal health, a 360 summary of any account, subscriptions renewing soon, overdue invoices, support cases at risk of breaching their SLA, and a reviewable new-lead form. Requires Brillienta CRM (brillienta-crm.sppkg) on a SharePoint site; every answer uses the signed-in person's own CRM permissions."
+        "default": "Brillienta CRM Copilot adds the Brillienta CRM agent to Microsoft 365 Copilot. Ask in plain language and the answer appears as an interactive card with live data from your CRM: your pipeline with AI deal health and risks, a 360 summary of any account (open deals, support cases, subscriptions and unpaid invoices), subscriptions renewing soon, overdue invoices, and support cases that have breached or are close to breaching their SLA. You can also add a new lead from the conversation: Copilot fills in the form and nothing is saved until you review it and press Save. Every card links back to the records in the CRM. Built with SharePoint Framework Copilot Components: data is read from your own SharePoint site with each person's own permissions, and nothing is copied out of Microsoft 365. The CRM site is found automatically. Requires Brillienta CRM (the brillienta-crm.sppkg package) on a SharePoint site and Microsoft 365 Copilot licences for the people who use it. Get started: start your free 30-day trial at https://brillienta.com/crm. Help: read the product guide at https://brillienta.com/guides/crm/. Contact us: https://brillienta.com/contact or support@brillienta.com."
       },
-      "screenshotPaths": [],
+      "screenshotPaths": [
+        "images/screenshot-1.png",
+        "images/screenshot-2.png",
+        "images/screenshot-3.png",
+        "images/screenshot-4.png"
+      ],
       "videoUrl": "",
       "categories": [
         "CRM",
+        "Sales + marketing",
         "Productivity"
       ]
     },
     "features": [
       {
         "title": "Brillienta CRM Copilot",
-        "description": "Deploys the Brillienta CRM Copilot Components and agent.",
+        "description": "Activates the Brillienta CRM Copilot Components and the Brillienta CRM agent for Microsoft 365 Copilot.",
         "id": "8b070239-429f-4348-b750-46820eb01e7b",
-        "version": "1.0.0.0"
+        "version": "1.0.3.0"
       }
     ],
     "iconPath": "images/AppIcon.png"

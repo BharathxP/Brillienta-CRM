@@ -8,11 +8,12 @@ import { createRoot } from 'react-dom/client';
 import { createTheme, initializeIcons } from '@fluentui/react';
 import BrillientaCrm from '../lib/webparts/brillientaCrm/components/BrillientaCrm';
 import { USERS, WEB, createFakeHttp, patchItem, previewState, seedGroupMembers } from './fakeSharePoint';
+import { seedDemo } from './demoData';
 
 const params = new URLSearchParams(window.location.search);
 const as = USERS[params.get('as') || 'asha'] || USERS.asha;
 initializeIcons(undefined, { disableWarnings: true });
-window.__crm = { state: previewState, seedGroupMembers, patchItem, user: as };
+window.__crm = { state: previewState, seedGroupMembers, patchItem, seedDemo, user: as };
 if (params.get('reset')) {
   // Keep the address clean so reloads do not wipe the site again.
   params.delete('reset');

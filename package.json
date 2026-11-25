@@ -10,6 +10,7 @@
     "build:copilot": "node copilot-solution/build.mjs",
     "preview": "heft build --clean && node preview/build.mjs",
     "e2e": "heft build --clean && node preview/build.mjs && node tests/e2e/run.cjs",
+    "store:screenshots": "heft build --clean && node preview/build.mjs && node tools/store/screenshots.cjs && node tools/store/copilot-screenshots.cjs",
     "clean": "heft clean",
     "eject-webpack": "heft eject-webpack",
     "start": "heft start --clean",

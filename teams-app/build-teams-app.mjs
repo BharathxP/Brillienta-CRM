@@ -23,7 +23,7 @@ const manifest = {
   packageName: 'com.brillienta.crm',
   developer: {
     name: 'Brillienta',
-    websiteUrl: 'https://brillienta.com',
+    websiteUrl: 'https://brillienta.com/crm',
     privacyUrl: 'https://brillienta.com/privacy',
     termsOfUseUrl: 'https://brillienta.com/terms'
   },
